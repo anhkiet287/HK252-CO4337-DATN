@@ -1,3 +1,39 @@
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "ardg"
+version = "0.1.0"
+description = "Robust CIFAR training/evaluation skeleton with PGD-AT and attack suite"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "torch>=2.0.0",
+  "torchvision>=0.15.0",
+  "pyyaml>=6.0",
+  "numpy>=1.23",
+  "scikit-learn>=1.2",
+  "tqdm>=4.66",
+  "torchattacks>=3.5.1",
+]
+
+[project.optional-dependencies]
+wandb = ["wandb>=0.15"]
+dev = [
+  "pytest>=7.0",
+  "ruff>=0.1.0",
+]
+notebooks = [
+  "ipykernel",
+  "matplotlib",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

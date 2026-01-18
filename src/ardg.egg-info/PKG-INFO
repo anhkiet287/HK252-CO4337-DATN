@@ -1,3 +1,25 @@
+Metadata-Version: 2.4
+Name: ardg
+Version: 0.1.0
+Summary: Robust CIFAR training/evaluation skeleton with PGD-AT and attack suite
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: torch>=2.0.0
+Requires-Dist: torchvision>=0.15.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: numpy>=1.23
+Requires-Dist: scikit-learn>=1.2
+Requires-Dist: tqdm>=4.66
+Requires-Dist: torchattacks>=3.5.1
+Provides-Extra: wandb
+Requires-Dist: wandb>=0.15; extra == "wandb"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Provides-Extra: notebooks
+Requires-Dist: ipykernel; extra == "notebooks"
+Requires-Dist: matplotlib; extra == "notebooks"
+
 # ARDG (Adversarial Robust Domain Generalization)
 
 Research-oriented **CIFAR-10** robust training/evaluation using **PGD Adversarial Training (PGD-AT)** and a standardized **attack suite**.
