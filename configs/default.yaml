@@ -1,0 +1,4 @@
+project: ardg
+seed: 42
+data:
+  root: data
