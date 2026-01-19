@@ -10,6 +10,7 @@ Requires-Dist: pyyaml>=6.0
 Requires-Dist: numpy>=1.23
 Requires-Dist: scikit-learn>=1.2
 Requires-Dist: tqdm>=4.66
+Requires-Dist: requests<2.26,>=2.25.1
 Requires-Dist: torchattacks>=3.5.1
 Provides-Extra: wandb
 Requires-Dist: wandb>=0.15; extra == "wandb"

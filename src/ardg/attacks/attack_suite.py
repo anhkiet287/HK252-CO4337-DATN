@@ -2,52 +2,26 @@
 
 from typing import Any, Dict, TYPE_CHECKING
 
+from ardg.attacks.pgd import build_pgd_attack
+
 if TYPE_CHECKING:
     from torch import nn
 
 
 def build_train_attack(cfg: Dict[str, Any], model: "nn.Module") -> Any:
-    """Build the training-time adversarial attack.
-
-    Args:
-        cfg: Configuration dictionary.
-        model: Model expecting normalized inputs of shape (B, 3, 32, 32).
-
-    Returns:
-        Attack object that takes (images, labels) and returns adversarial images
-        of shape (B, 3, 32, 32).
-
-    Notes:
-        Threat model: Linf.
-        Normalization: Attack expects inputs already normalized with CIFAR-10 mean/std.
-    """
-    raise NotImplementedError("TODO: implement build_train_attack")
+    """Build the training-time adversarial attack (PGD Linf)."""
+    model.eval()
+    return build_pgd_attack(cfg["attack"]["train"], model)
 
 
 def build_val_attack(cfg: Dict[str, Any], model: "nn.Module") -> Any:
-    """Build the validation-time adversarial attack.
-
-    Args:
-        cfg: Configuration dictionary.
-        model: Model expecting normalized inputs of shape (B, 3, 32, 32).
-
-    Returns:
-        Attack object that takes (images, labels) and returns adversarial images
-        of shape (B, 3, 32, 32).
-
-    Notes:
-        Threat model: Linf.
-        Normalization: Attack expects inputs already normalized with CIFAR-10 mean/std.
-    """
-    raise NotImplementedError("TODO: implement build_val_attack")
+    """Build the validation-time adversarial attack (PGD Linf)."""
+    model.eval()
+    return build_pgd_attack(cfg["attack"]["val"], model)
 
 
 def build_eval_attacks(cfg: Dict[str, Any], model: "nn.Module") -> Dict[str, Any]:
     """Build evaluation-time adversarial attacks.
-
-    Args:
-        cfg: Configuration dictionary.
-        model: Model expecting normalized inputs of shape (B, 3, 32, 32).
 
     Returns:
         Mapping from attack name to attack object.
@@ -56,4 +30,15 @@ def build_eval_attacks(cfg: Dict[str, Any], model: "nn.Module") -> Dict[str, Any
         Threat model: Linf.
         Normalization: Attack expects inputs already normalized with CIFAR-10 mean/std.
     """
-    raise NotImplementedError("TODO: implement build_eval_attacks")
+    model.eval()
+    eval_cfg = cfg["attack"]["eval"]
+    attacks: Dict[str, Any] = {}
+    attacks["pgd"] = build_pgd_attack(
+        {
+            "eps": eval_cfg.get("eps", cfg["attack"]["val"]["eps"]),
+            "step_size": eval_cfg.get("step_size", cfg["attack"]["val"].get("step_size", 0.007843)),
+            "num_steps": eval_cfg.get("num_steps", cfg["attack"]["val"].get("num_steps", 20)),
+        },
+        model,
+    )
+    return attacks

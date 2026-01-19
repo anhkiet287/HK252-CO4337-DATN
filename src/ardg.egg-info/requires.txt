@@ -4,6 +4,7 @@ pyyaml>=6.0
 numpy>=1.23
 scikit-learn>=1.2
 tqdm>=4.66
+requests<2.26,>=2.25.1
 torchattacks>=3.5.1
 
 [dev]

@@ -37,10 +37,10 @@ def main() -> None:
     cfg = load_config(args.config)
 
     set_seed(cfg["experiment"]["seed"])
-    setup_logging()
+    logger = setup_logging()
     init_wandb(cfg)
 
-    train_loader, val_loader = get_dataloaders(cfg)
+    train_loader, val_loader, _ = get_dataloaders(cfg)
     model = resnet18_cifar(cfg["model"]["num_classes"])
     trainer = Trainer(
         cfg,
@@ -48,6 +48,7 @@ def main() -> None:
         train_loader,
         val_loader,
         device=cfg["experiment"].get("device", "cpu"),
+        logger=logger,
     )
     trainer.train()
 

@@ -1,0 +1,17 @@
+{"time":"2026-01-19T13:26:56.148773+07:00","level":"INFO","msg":"stream: starting","core version":"0.24.0"}
+{"time":"2026-01-19T13:26:57.246602+07:00","level":"INFO","msg":"stream: created new stream","id":"klzy00aj"}
+{"time":"2026-01-19T13:26:57.246679+07:00","level":"INFO","msg":"handler: started","stream_id":"klzy00aj"}
+{"time":"2026-01-19T13:26:57.24686+07:00","level":"INFO","msg":"stream: started","id":"klzy00aj"}
+{"time":"2026-01-19T13:26:57.246861+07:00","level":"INFO","msg":"writer: started","stream_id":"klzy00aj"}
+{"time":"2026-01-19T13:26:57.246917+07:00","level":"INFO","msg":"sender: started","stream_id":"klzy00aj"}
+{"time":"2026-01-19T13:31:43.472208+07:00","level":"ERROR","msg":"api: HTTP error","status":401,"method":"POST","url":"https://api.wandb.ai/files/kiet-nguyenanh-ho-chi-minh-city-university-of-technology/ardg/klzy00aj/file_stream"}
+{"time":"2026-01-19T13:31:43.472618+07:00","level":"ERROR+4","msg":"filestream: fatal error: filestream: failed to upload: 401 Unauthorized url=https://api.wandb.ai/files/kiet-nguyenanh-ho-chi-minh-city-university-of-technology/ardg/klzy00aj/file_stream: {\"error\":\"must be logged in to submit runs\"}"}
+{"time":"2026-01-19T13:40:00.148823+07:00","level":"WARN","msg":"handler: ignoring partial history record","step":1,"current":6100}
+{"time":"2026-01-19T13:40:02.160568+07:00","level":"WARN","msg":"handler: ignoring partial history record","step":1,"current":6100}
+{"time":"2026-01-19T13:40:02.180656+07:00","level":"INFO","msg":"stream: closing","id":"klzy00aj"}
+{"time":"2026-01-19T13:40:02.638891+07:00","level":"ERROR","msg":"api: HTTP error","status":404,"method":"POST","url":"https://api.wandb.ai/graphql"}
+{"time":"2026-01-19T13:40:02.639195+07:00","level":"ERROR","msg":"runfiles: CreateRunFiles returned error: returned error 404: {\"data\":{\"createRunFiles\":null},\"errors\":[{\"message\":\"entity kiet-nguyenanh-ho-chi-minh-city-university-of-technology not found during createRunFiles\",\"path\":[\"createRunFiles\"]}]}"}
+{"time":"2026-01-19T13:40:02.64044+07:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2026-01-19T13:40:02.640656+07:00","level":"INFO","msg":"handler: closed","stream_id":"klzy00aj"}
+{"time":"2026-01-19T13:40:02.640995+07:00","level":"INFO","msg":"sender: closed","stream_id":"klzy00aj"}
+{"time":"2026-01-19T13:40:02.641051+07:00","level":"INFO","msg":"stream: closed","id":"klzy00aj"}

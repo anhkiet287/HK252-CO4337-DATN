@@ -1,0 +1,115 @@
+_wandb:
+    value:
+        cli_version: 0.24.0
+        e:
+            1vxj1bz3lm4qdgh2d12wux840e3gs86p:
+                apple:
+                    ecpuCores: 4
+                    gpuCores: 16
+                    memoryGb: 24
+                    name: Apple M4 Pro
+                    pcpuCores: 8
+                    ramTotalBytes: "25769803776"
+                args:
+                    - --config
+                    - configs/test.yaml
+                codePath: scripts/train.py
+                codePathLocal: scripts/train.py
+                cpu_count: 12
+                cpu_count_logical: 12
+                disk:
+                    /:
+                        total: "494353338368"
+                        used: "321114894336"
+                email: kiet.nguyenanh@hcmut.edu.vn
+                executable: /Users/kiet-na/Documents/HK252-CO4337-DATN/.venv/bin/python
+                git:
+                    commit: fefa01edd6489c24505616ea207359a498ab49bc
+                    remote: https://github.com/anhkiet287/HK252-CO4337-DATN.git
+                host: Nguyens-MacBook-Pro.local
+                memory:
+                    total: "25769803776"
+                os: macOS-26.2-arm64-arm-64bit-Mach-O
+                program: /Users/kiet-na/Documents/HK252-CO4337-DATN/scripts/train.py
+                python: CPython 3.13.2
+                root: /Users/kiet-na/Documents/HK252-CO4337-DATN
+                startedAt: "2026-01-19T06:26:54.651044Z"
+                writerId: 1vxj1bz3lm4qdgh2d12wux840e3gs86p
+        m: []
+        python_version: 3.13.2
+        t:
+            "1":
+                - 1
+                - 5
+                - 41
+                - 53
+            "2":
+                - 1
+                - 5
+                - 41
+                - 53
+            "3":
+                - 13
+                - 16
+                - 61
+            "4": 3.13.2
+            "5": 0.24.0
+            "8":
+                - 2
+            "12": 0.24.0
+            "13": darwin-arm64
+attack:
+    value:
+        autoattack:
+            enabled: false
+            eps: 0.0313725
+        eval:
+            eps: 0.0313725
+            name: attack_suite
+            num_steps: 2
+            step_size: 0.007843
+        train:
+            eps: 0.0313725
+            name: pgd
+            num_steps: 2
+            step_size: 0.007843
+        val:
+            eps: 0.0313725
+            name: pgd
+            num_steps: 2
+            step_size: 0.007843
+dataset:
+    value:
+        data_dir: data
+        name: cifar10
+        num_workers: 0
+        val_ratio: 0.02
+experiment:
+    value:
+        device: cpu
+        precision: fp32
+        seed: 42
+logging:
+    value:
+        output_dir: outputs
+        run_name: cifar10_test
+        wandb:
+            enabled: true
+            entity: ""
+            project: ardg
+model:
+    value:
+        name: resnet18_cifar
+        num_classes: 10
+train:
+    value:
+        batch_size: 8
+        epochs: 1
+        mode: pgd_at
+        optimizer:
+            lr: 0.01
+            momentum: 0.9
+            name: sgd
+            weight_decay: 0.0005
+        scheduler:
+            name: none

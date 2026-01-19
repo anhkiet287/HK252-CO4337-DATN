@@ -2,35 +2,24 @@
 
 from typing import TYPE_CHECKING
 
+from torch import nn
+from torchvision.models.resnet import BasicBlock, ResNet
+
 if TYPE_CHECKING:
-    import torch
-    from torch import nn
+    from torch import Tensor
 
 
-class ResNet:
-    """CIFAR-compatible ResNet placeholder.
+class ResNetCIFAR(ResNet):
+    """ResNet-18 with CIFAR stem (3x3 stride1 conv, no maxpool)."""
 
-    Notes:
-        Expects inputs of shape (B, 3, 32, 32) float32 normalized with CIFAR-10 mean/std.
-        Outputs logits of shape (B, C).
-    """
-
-    def __init__(self, *args, **kwargs) -> None:
-        raise NotImplementedError("TODO: implement ResNet")
-
-    def forward(self, inputs: "torch.Tensor") -> "torch.Tensor":
-        """Forward pass.
-
-        Args:
-            inputs: Image tensor of shape (B, 3, 32, 32), float32 normalized.
-
-        Returns:
-            Logits tensor of shape (B, C).
-        """
-        raise NotImplementedError("TODO: implement forward")
+    def __init__(self, num_classes: int) -> None:
+        super().__init__(block=BasicBlock, layers=[2, 2, 2, 2], num_classes=num_classes)
+        # CIFAR stem: smaller receptive field, no initial downsample
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.maxpool = nn.Identity()
 
 
-def resnet18_cifar(num_classes: int) -> "nn.Module":
+def resnet18_cifar(num_classes: int) -> nn.Module:
     """Create a CIFAR-style ResNet-18 model.
 
     Args:
@@ -39,4 +28,4 @@ def resnet18_cifar(num_classes: int) -> "nn.Module":
     Returns:
         A torch.nn.Module mapping (B, 3, 32, 32) to logits of shape (B, C).
     """
-    raise NotImplementedError("TODO: implement ResNet-18 factory")
+    return ResNetCIFAR(num_classes=num_classes)

@@ -25,4 +25,5 @@ src/ardg/training/trainer.py
 src/ardg/utils/logging.py
 src/ardg/utils/paths.py
 src/ardg/utils/seed.py
+tests/test_core.py
 tests/test_smoke.py

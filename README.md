@@ -32,48 +32,25 @@ We recommend `pip install -e .` so that local code changes are immediately refle
 
 ---
 
-### 2) Prepare deterministic split artifact
-
-```bash
-python scripts/prepare_data.py --config configs/default.yaml
-```
-
-This generates split artifacts in:
-- `data/processed/splits/`
-
----
-
-### 3) Train
+### 2) Train (creates splits on the fly)
 
 ```bash
 python scripts/train.py --config configs/default.yaml
 ```
 
-Outputs:
-- checkpoints → `outputs/checkpoints/`
-- reports/logs → `outputs/reports/` and `outputs/runs/`
+This downloads CIFAR (if missing), creates a stratified split from the config seed/val_ratio, and logs metrics to console/W&B (if enabled).
 
 ---
 
-### 4) Evaluate
+### 3) Evaluate (val + test)
 
 ```bash
-python scripts/evaluate.py --config configs/default.yaml --checkpoint outputs/checkpoints/last.pt
+python scripts/evaluate.py --config configs/default.yaml --checkpoint <path_to_checkpoint>
 ```
 
-This runs:
-- clean evaluation
-- TorchAttacks suite evaluation
-- AutoAttack (if enabled in config)
+Runs clean + configured attacks (and AutoAttack if enabled) on both val/test splits and logs to console/W&B.
 
 ---
-
-## Outputs
-
-By default, artifacts are written to:
-- `outputs/checkpoints/` — saved checkpoints (e.g., last.pt, best.pt)
-- `outputs/reports/` — evaluation summaries (json/csv)
-- `outputs/runs/` — training logs and run metadata
 
 ---
 

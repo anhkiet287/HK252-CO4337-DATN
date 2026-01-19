@@ -1,0 +1,35 @@
+.
+├── .gitignore
+├── README.md
+├── configs
+│   └── default.yaml
+├── outputs
+│   ├── checkpoints
+│   ├── reports
+│   └── runs
+├── pyproject.toml
+├── repo-structure.txt
+├── scripts
+│   ├── evaluate.py
+│   ├── prepare_data.py
+│   └── train.py
+└── src
+    └── ardg
+        ├── __init__.py
+        ├── attacks
+        │   ├── autoattack_runner.py
+        │   └── torchattacks_suite.py
+        ├── config.py
+        ├── evaluation
+        │   └── evaluator.py
+        ├── models
+        │   └── resnet.py
+        ├── training
+        │   ├── losses.py
+        │   └── trainer.py
+        └── utils
+            ├── logging.py
+            ├── paths.py
+            └── seed.py
+
+14 directories, 19 files
