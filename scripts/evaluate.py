@@ -34,7 +34,18 @@ def main() -> None:
 
     model = resnet18_cifar(cfg["model"]["num_classes"])
     checkpoint = torch.load(args.checkpoint, map_location=torch.device(device))
-    state_dict = checkpoint.get("model") if isinstance(checkpoint, dict) else checkpoint
+    if isinstance(checkpoint, dict):
+        if "model" in checkpoint:
+            state_dict = checkpoint["model"]
+        elif "state_dict" in checkpoint:
+            state_dict = checkpoint["state_dict"]
+        else:
+            # Assume the dict itself is already a state_dict
+            state_dict = checkpoint
+    else:
+        state_dict = checkpoint
+    if not isinstance(state_dict, dict):
+        raise ValueError(f"Checkpoint at {args.checkpoint} does not contain a valid state_dict.")
     model.load_state_dict(state_dict)
     model.to(device)
 

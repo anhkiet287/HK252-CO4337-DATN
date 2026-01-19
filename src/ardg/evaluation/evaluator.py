@@ -31,7 +31,6 @@ def evaluate_clean(model: Any, loader: Any, device: str) -> Dict[str, float]:
     }
 
 
-@torch.no_grad()
 def evaluate_under_attack(model: Any, loader: Any, attack: Any, device: str) -> Dict[str, float]:
     """Evaluate a classifier under a given adversarial attack."""
     model.eval()
