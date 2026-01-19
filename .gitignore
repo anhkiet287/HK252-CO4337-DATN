@@ -8,3 +8,4 @@ dist/
 *.egg-info/
 data/
 wandb/
+src/ardg.egg-info
