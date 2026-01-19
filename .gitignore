@@ -6,3 +6,7 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+data/*.tar.gz
+data/cifar-10-batches-py/
+data/cifar-100-batches-py/
+wandb/

@@ -17,3 +17,5 @@ config: {'experiment': {'seed': 42, 'device': 'cpu', 'precision': 'fp32'}, 'data
 2026-01-19 13:41:47,417 INFO    MainThread:28096 [wandb_run.py:_redirect():2446] Wrapping output streams.
 2026-01-19 13:41:47,417 INFO    MainThread:28096 [wandb_run.py:_redirect():2469] Redirects installed.
 2026-01-19 13:41:47,419 INFO    MainThread:28096 [wandb_init.py:init():1084] run started, returning control to user process
+2026-01-19 13:54:07,150 INFO    wandb-AsyncioManager-main:28096 [service_client.py:_forward_responses():80] Reached EOF.
+2026-01-19 13:54:07,150 INFO    wandb-AsyncioManager-main:28096 [mailbox.py:close():137] Closing mailbox, abandoning 1 handles.
