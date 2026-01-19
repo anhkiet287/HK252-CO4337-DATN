@@ -18,7 +18,7 @@ model:
 
 train:
   mode: "erm"
-  epochs: 1
+  epochs: 10
   batch_size: 8
   max_batches: 5
   max_val_batches: 3
@@ -53,7 +53,7 @@ attack:
 
 logging:
   wandb:
-    enabled: false
+    enabled: true
     project: "ardg"
     entity: ""
   run_name: "test_local"

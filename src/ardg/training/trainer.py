@@ -37,6 +37,7 @@ class Trainer:
         self.max_train_batches = cfg["train"].get("max_batches")
         self.max_val_batches = cfg["train"].get("max_val_batches")
         self.log_interval = cfg["train"].get("log_interval", 50)
+        self.global_step = 0
 
         opt_cfg = cfg["train"]["optimizer"]
         self.optimizer = torch.optim.SGD(
@@ -65,10 +66,10 @@ class Trainer:
             train_metrics = self.train_one_epoch(epoch)
             train_metrics["time_sec"] = time.perf_counter() - start
             train_metrics["device"] = str(self.device)
-            log_metrics(self.logger, train_metrics, epoch, "train")
+            log_metrics(self.logger, train_metrics, self.global_step, "train")
             val_metrics = self.validate(epoch)
             val_metrics["device"] = str(self.device)
-            log_metrics(self.logger, val_metrics, epoch, "val")
+            log_metrics(self.logger, val_metrics, self.global_step, "val")
             if self.scheduler is not None:
                 self.scheduler.step()
             self.logger.info("Finished epoch %s in %.2fs", epoch, train_metrics["time_sec"])
@@ -80,6 +81,7 @@ class Trainer:
         total_correct = 0
         total_seen = 0
         for step_idx, batch in enumerate(self.train_loader, start=1):
+            self.global_step += 1
             metrics = self._train_step(batch)
             total_loss += metrics["loss"] * metrics["batch_size"]
             total_correct += metrics["correct"]
@@ -90,7 +92,7 @@ class Trainer:
                     "acc": metrics["acc"],
                     "lr": metrics["lr"],
                 }
-                log_metrics(self.logger, batch_metrics, step_idx, "train_batch")
+                log_metrics(self.logger, batch_metrics, self.global_step, "train_batch")
             if self.max_train_batches and step_idx >= self.max_train_batches:
                 break
         avg_loss = total_loss / max(total_seen, 1)
