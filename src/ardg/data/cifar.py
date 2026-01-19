@@ -60,8 +60,20 @@ def get_dataloaders(cfg: dict) -> Tuple[Any, Any, Any]:
     train_idx = splits["train"]
     val_idx = splits["val"]
 
+    max_train = cfg["dataset"].get("max_train_samples")
+    max_val = cfg["dataset"].get("max_val_samples")
+    max_test = cfg["dataset"].get("max_test_samples")
+
+    if max_train:
+        train_idx = train_idx[: int(max_train)]
+    if max_val:
+        val_idx = val_idx[: int(max_val)]
+
     train_subset = Subset(train_ds_aug, train_idx)
     val_subset = Subset(train_ds_eval, val_idx)
+    if max_test:
+        test_indices = list(range(min(int(max_test), len(test_ds))))
+        test_ds = Subset(test_ds, test_indices)
 
     pin = torch.cuda.is_available()
 

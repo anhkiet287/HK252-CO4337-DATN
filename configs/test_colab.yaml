@@ -1,0 +1,60 @@
+experiment:
+  seed: 42
+  device: "cuda"
+  precision: "fp32"
+
+dataset:
+  name: "cifar10"
+  data_dir: "data"
+  val_ratio: 0.1
+  num_workers: 2
+  max_train_samples: 10
+  max_val_samples: 10
+  max_test_samples: 20
+
+model:
+  name: "resnet18_cifar"
+  num_classes: 10
+
+train:
+  mode: "erm"             # switch to pgd_at if needed
+  epochs: 1
+  batch_size: 64
+  max_batches: 5
+  max_val_batches: 3
+  log_interval: 1
+  optimizer:
+    name: "sgd"
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0005
+  scheduler:
+    name: "none"
+
+attack:
+  train:
+    name: "pgd"
+    eps: 0.0313725
+    step_size: 0.007843
+    num_steps: 1
+  val:
+    name: "pgd"
+    eps: 0.0313725
+    step_size: 0.007843
+    num_steps: 1
+  eval:
+    name: "attack_suite"
+    eps: 0.0313725
+    step_size: 0.007843
+    num_steps: 1
+  autoattack:
+    enabled: false
+    eps: 0.0313725
+
+logging:
+  wandb:
+    enabled: false          # set true on Colab when desired
+    project: "ardg"
+    entity: ""
+  run_name: "test_colab"
+  output_dir: "outputs"
