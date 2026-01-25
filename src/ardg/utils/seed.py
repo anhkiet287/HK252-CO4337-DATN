@@ -14,11 +14,12 @@ except ImportError:  # pragma: no cover - optional dependency
     torch = None
 
 
-def set_seed(seed: int) -> None:
+def set_seed(seed: int, deterministic: bool = True) -> None:
     """Set RNG seeds for reproducibility.
 
     Args:
         seed: Random seed value.
+        deterministic: Whether to enable deterministic CUDA behavior.
 
     Side effects:
         Sets PYTHONHASHSEED, seeds random/numpy/torch RNGs, and configures
@@ -32,8 +33,16 @@ def set_seed(seed: int) -> None:
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+        if deterministic:
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+            if hasattr(torch, "use_deterministic_algorithms"):
+                torch.use_deterministic_algorithms(True)
+        else:
+            torch.backends.cudnn.deterministic = False
+            torch.backends.cudnn.benchmark = True
+            if hasattr(torch, "use_deterministic_algorithms"):
+                torch.use_deterministic_algorithms(False)
 
 
 def get_seed(env_var: str = "SEED", default: int = 42) -> int:

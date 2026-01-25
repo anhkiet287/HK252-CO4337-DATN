@@ -5,6 +5,7 @@ from typing import Any, Dict, Tuple
 import torch
 
 from ardg.config import load_config
+from ardg.utils.platform import resolve_platform
 from ardg.data.datasets import get_dataloaders
 from ardg.evaluation.evaluator import evaluate_clean
 from ardg.models.factory import build_model
@@ -22,7 +23,10 @@ def setup_run(cfg_path: str) -> Tuple[Dict[str, Any], Any, Any, str]:
         Tuple of (cfg, logger, wandb_run, device).
     """
     cfg = load_config(cfg_path)
-    set_seed(cfg["experiment"]["seed"])
+    platform = resolve_platform(cfg.get("experiment", {}).get("platform"))
+    cfg.setdefault("experiment", {})["platform"] = platform
+    deterministic = cfg.get("experiment", {}).get("deterministic", True)
+    set_seed(cfg["experiment"]["seed"], deterministic=deterministic)
     logger = setup_logging(name=cfg.get("logging", {}).get("run_name"))
     run = init_wandb(cfg)
     device = cfg["experiment"].get("device", "cpu")

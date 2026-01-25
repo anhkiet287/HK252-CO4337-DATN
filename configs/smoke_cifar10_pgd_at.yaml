@@ -2,6 +2,8 @@ experiment:
   seed: 123
   device: "cuda"
   precision: "fp32"
+  deterministic: true
+  platform: "local"
 
 dataset:
   name: "cifar10"
