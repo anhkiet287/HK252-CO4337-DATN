@@ -1,6 +1,6 @@
 # ARDG (Adversarial Robust Domain Generalization)
 
-Research-oriented **CIFAR-10** robust training/evaluation using **PGD Adversarial Training (PGD-AT)** and a standardized **attack suite**.
+Research-oriented robust training/evaluation for multiple small image datasets using **PGD Adversarial Training (PGD-AT)** and a standardized **attack suite**.
 
 - Primary attack backend: **TorchAttacks**
 - **AutoAttack** is used for evaluation only (optional)
@@ -18,7 +18,7 @@ Run from the repo root.
 pip install -e .
 ```
 
-With Weights & Biases logging (optional):
+With Weights & Biases logging:
 ```bash
 pip install -e ".[wandb]"
 ```
@@ -38,7 +38,7 @@ We recommend `pip install -e .` so that local code changes are immediately refle
 python scripts/train.py --config configs/default.yaml
 ```
 
-This downloads CIFAR (if missing), creates a stratified split from the config seed/val_ratio, and logs metrics to console/W&B (if enabled).
+This downloads the dataset (if missing), creates a stratified split from the config seed/val_ratio, and logs metrics to console/W&B.
 
 ---
 
@@ -52,14 +52,27 @@ Runs clean + configured attacks (and AutoAttack if enabled) on both val/test spl
 
 ---
 
+## Smoke tests (train 2 epochs + clean eval)
+
+Run all smoke configs (CIFAR-10, MNIST, Fashion-MNIST, Color-MNIST):
+```bash
+python scripts/smoke_test.py
+```
+
+Run a single smoke config:
+```bash
+python scripts/smoke_test.py --configs configs/smoke_mnist_resnet.yaml
+```
+
 ---
 
 ## Repo layout (essentials)
-- `configs/default.yaml` — single source of truth (dataset/model/train/attacks/logging)
-- `scripts/` — entry points (prepare_data.py, train.py, evaluate.py)
-- `src/ardg/` — library code (models, attacks, training, evaluation, utils)
-- `data/` — dataset cache + processed split artifacts
-- `outputs/` — runtime artifacts (not committed)
+- `configs/default.yaml` -- single source of truth (dataset/model/train/attacks/logging)
+- `configs/smoke_*.yaml` -- small smoke-test configs for quick checks
+- `scripts/` -- entry points (prepare_data.py, train.py, evaluate.py, smoke_test.py)
+- `src/ardg/` -- library code (models, attacks, training, evaluation, utils)
+- `data/` -- dataset cache + processed split artifacts
+- `outputs/` -- runtime artifacts (not committed)
 
 ---
 
@@ -69,7 +82,7 @@ Default config targets:
 - CIFAR-10
 - stratified validation split: 2%
 - seed: 42
-- training: PGD-AT (ℓ∞)
+- training: PGD-AT (Linf)
 - evaluation: clean + attack suite (+ optional AutoAttack)
 
 All hyperparameters must be controlled via `configs/default.yaml` (no hardcoded experiment settings inside code).

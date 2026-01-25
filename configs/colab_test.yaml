@@ -50,7 +50,7 @@ attack:
 
 logging:
   wandb:
-    enabled: false          # set true on Colab when you want to log
+    enabled: true
     project: "ardg"
     entity: ""
   run_name: "colab_test"

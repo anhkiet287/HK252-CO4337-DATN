@@ -3,16 +3,17 @@
 import argparse
 import time
 
-import torch
-
 from ardg.attacks.attack_suite import build_eval_attacks
 from ardg.attacks.autoattack import run_autoattack
-from ardg.config import DEFAULT_CONFIG_PATH, load_config
-from ardg.data.cifar import get_dataloaders
-from ardg.evaluation.evaluator import evaluate_clean, evaluate_suite
-from ardg.models.resnet import resnet18_cifar
-from ardg.utils.logging import init_wandb, log_metrics, setup_logging
-from ardg.utils.seed import set_seed
+from ardg.config import DEFAULT_CONFIG_PATH
+from ardg.evaluation.evaluator import evaluate_suite
+from ardg.experiments.common import (
+    build_loaders,
+    load_model_from_checkpoint,
+    run_clean_eval,
+    setup_run,
+)
+from ardg.utils.logging import log_metrics
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,44 +26,33 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     """Run evaluation on clean and adversarial inputs."""
+    # Parsing arguments and loading config.
     args = parse_args()
-    cfg = load_config(args.config)
-    set_seed(cfg["experiment"]["seed"])
-    logger = setup_logging()
-    init_wandb(cfg)
-    device = cfg["experiment"].get("device", "cpu")
+    cfg, logger, _, device = setup_run(args.config)
 
-    model = resnet18_cifar(cfg["model"]["num_classes"])
-    checkpoint = torch.load(args.checkpoint, map_location=torch.device(device))
-    if isinstance(checkpoint, dict):
-        if "model" in checkpoint:
-            state_dict = checkpoint["model"]
-        elif "state_dict" in checkpoint:
-            state_dict = checkpoint["state_dict"]
-        else:
-            # Assume the dict itself is already a state_dict
-            state_dict = checkpoint
-    else:
-        state_dict = checkpoint
-    if not isinstance(state_dict, dict):
-        raise ValueError(f"Checkpoint at {args.checkpoint} does not contain a valid state_dict.")
-    model.load_state_dict(state_dict)
-    model.to(device)
+    # Building model and loading checkpoint.
+    model = load_model_from_checkpoint(cfg, args.checkpoint, device)
 
-    _, val_loader, test_loader = get_dataloaders(cfg)
-    attacks = build_eval_attacks(cfg, model)
+    # Building data loaders and attacks.
+    _, val_loader, test_loader = build_loaders(cfg)
+    eval_enabled = cfg.get("attack", {}).get("eval", {}).get("enabled", True)
+    attacks = build_eval_attacks(cfg, model) if eval_enabled else {}
 
+    # Running evaluation.
     start = time.perf_counter()
+    base_step = 0
+    step_map = {"val": base_step, "test": base_step + 1}
+    run_clean_eval(model, val_loader, test_loader, device, logger, step=base_step)
     for split_name, loader in (("val", val_loader), ("test", test_loader)):
-        clean_metrics = evaluate_clean(model, loader, device)
-        clean_metrics["device"] = str(device)
-        log_metrics(logger, clean_metrics, step=0, split=f"{split_name}_clean")
+        
+        # Evaluate on adversarial inputs
+        if attacks:
+            attack_metrics = evaluate_suite(model, loader, attacks, device)
+            for name, metrics in attack_metrics.items():
+                metrics["device"] = str(device)
+                log_metrics(logger, metrics, step=step_map[split_name], split=f"{split_name}_{name}")
 
-        attack_metrics = evaluate_suite(model, loader, attacks, device)
-        for name, metrics in attack_metrics.items():
-            metrics["device"] = str(device)
-            log_metrics(logger, metrics, step=0, split=f"{split_name}_{name}")
-
+        # Optional AutoAttack evaluation
         if cfg.get("attack", {}).get("autoattack", {}).get("enabled", False):
             autoattack_metrics = run_autoattack(
                 model,
@@ -71,10 +61,10 @@ def main() -> None:
                 device,
             )
             autoattack_metrics["device"] = str(device)
-            log_metrics(logger, autoattack_metrics, step=0, split=f"{split_name}_autoattack")
+            log_metrics(logger, autoattack_metrics, step=step_map[split_name], split=f"{split_name}_autoattack")
 
     elapsed = time.perf_counter() - start
-    log_metrics(logger, {"time_sec": elapsed, "device": str(device)}, step=0, split="eval_runtime")
+    log_metrics(logger, {"time_sec": elapsed, "device": str(device)}, step=base_step + 2, split="eval_runtime")
 
 
 if __name__ == "__main__":

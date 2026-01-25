@@ -25,20 +25,21 @@ def setup_logging(level: int = logging.INFO, name: Optional[str] = None) -> logg
 
 
 def init_wandb(cfg: Dict[str, Any]) -> Optional[Any]:
-    """Initialize a Weights & Biases run when enabled.
+    """Initialize a Weights & Biases run.
 
     Args:
         cfg: Configuration dictionary with logging.wandb settings.
 
     Returns:
-        wandb run object if enabled, otherwise None.
+        Active wandb run.
 
-    Side effects:
-        Starts a wandb run when enabled.
+    Raises:
+        ValueError: When wandb logging is disabled in the config.
+        ImportError: When wandb is enabled but not installed.
     """
     wandb_cfg = cfg.get("logging", {}).get("wandb", {})
     if not wandb_cfg.get("enabled", False):
-        return None
+        raise ValueError("wandb logging must be enabled for every run.")
 
     try:
         import wandb  # type: ignore

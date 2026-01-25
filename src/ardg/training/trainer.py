@@ -26,7 +26,19 @@ class Trainer:
         device: Optional[str] = None,
         logger: Optional[logging.Logger] = None,
     ) -> None:
-        """Initialize the trainer."""
+        """Initialize the trainer.
+
+        Args:
+            cfg: Configuration dictionary.
+            model: Model to train.
+            train_loader: Training data loader.
+            val_loader: Validation data loader.
+            device: Device string such as "cpu" or "cuda".
+            logger: Logger instance.
+
+        Raises:
+            KeyError: If required config keys are missing.
+        """
         self.cfg = cfg
         self.model = model
         self.train_loader = train_loader
@@ -56,10 +68,21 @@ class Trainer:
             )
 
         self.attack = build_train_attack(cfg, model) if cfg["train"]["mode"] == "pgd_at" else None
+        self.best_metric = float("-inf")
+        self.best_epoch = 0
+        self.best_ckpt_path: Optional[str] = None
 
-    def train(self) -> None:
-        """Run the full training loop."""
+    def train(self) -> Dict[str, str]:
+        """Run the full training loop.
+
+        Returns:
+            Mapping with "last" and "best" checkpoint paths.
+
+        Raises:
+            RuntimeError: If no checkpoint is saved during training.
+        """
         epochs = self.cfg["train"]["epochs"]
+        last_ckpt_path = ""
         for epoch in range(1, epochs + 1):
             self.logger.info("Starting epoch %s", epoch)
             start = time.perf_counter()
@@ -70,12 +93,46 @@ class Trainer:
             val_metrics = self.validate(epoch)
             val_metrics["device"] = str(self.device)
             log_metrics(self.logger, val_metrics, self.global_step, "val")
+            val_acc = float(val_metrics.get("acc", 0.0))
+            last_ckpt_path = self._save_checkpoint(
+                "last",
+                {
+                    "epoch": epoch,
+                    "val_acc": val_acc,
+                    "val_loss": float(val_metrics.get("loss", 0.0)),
+                },
+            )
+            if val_acc >= self.best_metric:
+                self.best_metric = val_acc
+                self.best_epoch = epoch
+                self.best_ckpt_path = self._save_checkpoint(
+                    "best",
+                    {
+                        "epoch": epoch,
+                        "val_acc": val_acc,
+                        "val_loss": float(val_metrics.get("loss", 0.0)),
+                    },
+                )
             if self.scheduler is not None:
                 self.scheduler.step()
             self.logger.info("Finished epoch %s in %.2fs", epoch, train_metrics["time_sec"])
+        if not last_ckpt_path:
+            raise RuntimeError("No checkpoint saved during training.")
+        best_path = self.best_ckpt_path or last_ckpt_path
+        return {"last": last_ckpt_path, "best": best_path}
 
     def train_one_epoch(self, epoch: int) -> Dict[str, float]:
-        """Run one training epoch."""
+        """Run one training epoch.
+
+        Args:
+            epoch: 1-based epoch index.
+
+        Returns:
+            Dictionary with averaged loss and accuracy.
+
+        Raises:
+            RuntimeError: If a training step fails.
+        """
         self.model.train()
         total_loss = 0.0
         total_correct = 0
@@ -101,7 +158,17 @@ class Trainer:
 
     @torch.no_grad()
     def validate(self, epoch: int) -> Dict[str, float]:
-        """Run validation for one epoch."""
+        """Run validation for one epoch.
+
+        Args:
+            epoch: 1-based epoch index.
+
+        Returns:
+            Dictionary with averaged loss and accuracy.
+
+        Raises:
+            RuntimeError: If validation fails.
+        """
         self.model.eval()
         total_loss = 0.0
         total_correct = 0
@@ -119,7 +186,17 @@ class Trainer:
         return {"loss": total_loss / max(total_seen, 1), "acc": total_correct / max(total_seen, 1)}
 
     def _train_step(self, batch: Any) -> Dict[str, float]:
-        """Run a single training step."""
+        """Run a single training step.
+
+        Args:
+            batch: Batch tuple of images and labels.
+
+        Returns:
+            Dictionary of per-batch metrics.
+
+        Raises:
+            RuntimeError: If the optimization step fails.
+        """
         images, labels = batch
         images = images.to(self.device)
         labels = labels.to(self.device)
@@ -143,14 +220,36 @@ class Trainer:
         }
 
     def _make_adv_batch(self, images: Any, labels: Any) -> Any:
-        """Generate adversarial examples for PGD-AT."""
+        """Generate adversarial examples for PGD-AT.
+
+        Args:
+            images: Input images tensor.
+            labels: Ground-truth labels.
+
+        Returns:
+            Adversarially perturbed images.
+
+        Raises:
+            RuntimeError: If the adversarial attack fails.
+        """
         self.model.eval()
         adv = self.attack(images, labels)
         self.model.train()
         return adv.detach()
 
     def _save_checkpoint(self, name: str, metrics: Dict[str, float]) -> str:
-        """Save a model checkpoint."""
+        """Save a model checkpoint.
+
+        Args:
+            name: Checkpoint name (e.g. "last", "best").
+            metrics: Metrics to store alongside the model state.
+
+        Returns:
+            Path to the saved checkpoint.
+
+        Raises:
+            RuntimeError: If saving the checkpoint fails.
+        """
         run_dir = get_run_dir(self.cfg)
         ensure_dir(run_dir)
         ckpt_path = f"{run_dir}/{name}.pt"
