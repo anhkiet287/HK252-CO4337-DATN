@@ -29,6 +29,8 @@ def set_seed(seed: int, deterministic: bool = True) -> None:
     random.seed(seed)
     if np is not None:
         np.random.seed(seed)
+    if deterministic:
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     if torch is not None:
         torch.manual_seed(seed)
         if torch.cuda.is_available():
