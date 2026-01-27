@@ -1,0 +1,42 @@
+experiment:
+  seed: 123
+  device: "cuda"  # set to "cpu" if no GPU locally
+  deterministic: true
+
+dataset:
+  name: "cifar10"
+  data_dir: "data"
+  val_ratio: 0.1
+  max_train_samples: 256
+  max_val_samples: 128
+
+model:
+  name: "resnet18_cifar"
+  num_classes: 10
+
+train:
+  mode: "groupdro"  # exercises trainer1/objective path; uses labels as groups
+  epochs: 2
+  batch_size: 64
+  log_interval: 5
+  max_batches: 5
+  max_val_batches: 2
+  optimizer:
+    name: "sgd"
+    lr: 0.05
+    momentum: 0.9
+    weight_decay: 0.0005
+  scheduler:
+    name: "cosine"
+    t_max: 2
+    eta_min: 0.0
+  groupdro:
+    eta: 0.02
+
+logging:
+  wandb:
+    enabled: false
+    project: "ardg"
+    entity: ""
+  run_name: "smoke_local_trainer1_resnet18"
+  output_dir: "outputs/smoke_local"

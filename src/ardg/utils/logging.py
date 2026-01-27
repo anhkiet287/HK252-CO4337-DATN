@@ -34,12 +34,11 @@ def init_wandb(cfg: Dict[str, Any]) -> Optional[Any]:
         Active wandb run.
 
     Raises:
-        ValueError: When wandb logging is disabled in the config.
         ImportError: When wandb is enabled but not installed.
     """
     wandb_cfg = cfg.get("logging", {}).get("wandb", {})
     if not wandb_cfg.get("enabled", False):
-        raise ValueError("wandb logging must be enabled for every run.")
+        return None
 
     try:
         import wandb  # type: ignore

@@ -66,6 +66,14 @@ class Trainer1:
                 milestones=sched_cfg.get("milestones", []),
                 gamma=sched_cfg.get("gamma", 0.1),
             )
+        if sched_cfg.get("name") == "cosine":
+            t_max = sched_cfg.get("t_max", cfg["train"].get("epochs", 100))
+            eta_min = sched_cfg.get("eta_min", 0.0)
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer,
+                T_max=t_max,
+                eta_min=eta_min,
+            )
 
         # Objective (handles ERM/PGD/REx/GroupDRO/GroupDRO++)
         self.objective = build_objective(cfg, model)
@@ -129,6 +137,7 @@ class Trainer1:
                     },
                 )
             if self.scheduler is not None:
+                # Step scheduler with explicit epoch index so cosine decays from first epoch.
                 self.scheduler.step()
             self.logger.info("Finished epoch %s in %.2fs", epoch, train_metrics["time_sec"])
         if not last_ckpt_path:
@@ -173,7 +182,9 @@ class Trainer1:
                 break
         avg_loss = total_loss / max(total_seen, 1) # compute average loss
         acc = total_correct / max(total_seen, 1) # compute accuracy
-        return {"loss": avg_loss, "acc": acc} 
+        # Log the last LR for epoch-level metrics
+        current_lr = self.optimizer.param_groups[0]["lr"]
+        return {"loss": avg_loss, "acc": acc, "lr": current_lr} 
 
     @torch.no_grad()
     def validate(self, epoch: int) -> Dict[str, float]:

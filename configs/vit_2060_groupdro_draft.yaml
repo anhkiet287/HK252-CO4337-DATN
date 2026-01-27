@@ -23,11 +23,9 @@ train:
     momentum: 0.9
     weight_decay: 0.0005
   scheduler:
-    name: multistep
-    milestones:
-    - 60
-    - 80
-    gamma: 0.1
+    name: cosine
+    t_max: 2
+    eta_min: 0.0
   groupdro:
     eta: 0.02
   groupdro_plus:
