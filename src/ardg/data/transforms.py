@@ -50,16 +50,30 @@ def build_transforms(cfg: dict, split: str) -> Any:
     name = _normalize_name(cfg["dataset"]["name"])
     mean, std = _get_stats(name)
 
+    aug = cfg.get("dataset", {}).get("augmentation", "standard").lower()
+
     if name in ("cifar10", "cifar100"):
         if split == "train":
-            return transforms.Compose(
+            train_tfms = [
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(),
+            ]
+            if aug == "randaugment":
+                train_tfms.insert(0, transforms.RandAugment(num_ops=2, magnitude=9))
+            train_tfms.extend(
                 [
-                    transforms.RandomCrop(32, padding=4),
-                    transforms.RandomHorizontalFlip(),
                     transforms.ToTensor(),
                     transforms.Normalize(mean, std),
                 ]
             )
+            if aug == "cutout":
+                # Use RandomErasing as a Cutout-style regularizer.
+                train_tfms.append(
+                    transforms.RandomErasing(
+                        p=0.5, scale=(0.02, 0.1), ratio=(0.3, 3.3), value="random"
+                    )
+                )
+            return transforms.Compose(train_tfms)
         return transforms.Compose(
             [
                 transforms.ToTensor(),
@@ -80,6 +94,12 @@ def build_transforms(cfg: dict, split: str) -> Any:
                 transforms.Normalize(mean, std),
             ]
         )
+        if split == "train" and aug == "cutout":
+            base.append(
+                transforms.RandomErasing(
+                    p=0.5, scale=(0.02, 0.1), ratio=(0.3, 3.3), value="random"
+                )
+            )
         return transforms.Compose(base)
 
     if name == "color-mnist":

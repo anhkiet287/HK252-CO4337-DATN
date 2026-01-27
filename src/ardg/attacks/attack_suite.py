@@ -11,13 +11,17 @@ if TYPE_CHECKING:
 def build_train_attack(cfg: Dict[str, Any], model: "nn.Module") -> Any:
     """Build the training-time adversarial attack (PGD Linf)."""
     model.eval()
-    return build_pgd_attack(cfg["attack"]["train"], model)
+    atk_cfg = dict(cfg["attack"]["train"])
+    atk_cfg["dataset_name"] = cfg["dataset"]["name"]
+    return build_pgd_attack(atk_cfg, model)
 
 
 def build_val_attack(cfg: Dict[str, Any], model: "nn.Module") -> Any:
     """Build the validation-time adversarial attack (PGD Linf)."""
     model.eval()
-    return build_pgd_attack(cfg["attack"]["val"], model)
+    atk_cfg = dict(cfg["attack"]["val"])
+    atk_cfg["dataset_name"] = cfg["dataset"]["name"]
+    return build_pgd_attack(atk_cfg, model)
 
 
 def build_eval_attacks(cfg: Dict[str, Any], model: "nn.Module") -> Dict[str, Any]:
@@ -33,8 +37,10 @@ def build_eval_attacks(cfg: Dict[str, Any], model: "nn.Module") -> Dict[str, Any
     model.eval()
     eval_cfg = cfg["attack"]["eval"]
     attacks: Dict[str, Any] = {}
+    base = {"dataset_name": cfg["dataset"]["name"]}
     attacks["pgd"] = build_pgd_attack(
         {
+            **base,
             "eps": eval_cfg.get("eps", cfg["attack"]["val"]["eps"]),
             "step_size": eval_cfg.get("step_size", cfg["attack"]["val"].get("step_size", 0.007843)),
             "num_steps": eval_cfg.get("num_steps", cfg["attack"]["val"].get("num_steps", 20)),

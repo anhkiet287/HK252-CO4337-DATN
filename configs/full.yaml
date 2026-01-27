@@ -1,21 +1,22 @@
 experiment:
   seed: 42
   device: cuda
-  precision: fp32
+  precision: fp16
   deterministic: true
   platform: local
 dataset:
   name: cifar10
   data_dir: data
   val_ratio: 0.02
-  num_workers: 4
+  num_workers: 8
+  augmentation: randaugment
 model:
   name: resnet18_cifar
   num_classes: 10
 train:
   mode: pgd_at
   epochs: 100
-  batch_size: 128
+  batch_size: 256
   log_interval: 10
   optimizer:
     name: sgd
@@ -51,4 +52,4 @@ logging:
     project: ardg
     entity: ''
   run_name: full_run
-  output_dir: /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs
+  output_dir: outputs
