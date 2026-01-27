@@ -13,7 +13,7 @@ dataset:
   max_test_samples: 20
 
 model:
-  name: "resnet18_cifar"
+  name: "vit_b16_cifar"
   num_classes: 10
 
 train:

@@ -24,6 +24,18 @@ def _get_stats(name: str) -> Tuple[Tuple[float, float, float], Tuple[float, floa
     return _DATASET_STATS[key]
 
 
+def get_dataset_stats(name: str) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+    """Return normalization stats for a dataset.
+
+    Args:
+        name: Dataset name from config or CLI.
+
+    Returns:
+        Tuple of (mean, std) for 3-channel inputs.
+    """
+    return _get_stats(name)
+
+
 def build_transforms(cfg: dict, split: str) -> Any:
     """Build preprocessing transforms for a given split.
 
