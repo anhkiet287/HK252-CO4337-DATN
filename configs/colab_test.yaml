@@ -1,57 +1,52 @@
 experiment:
   seed: 42
-  device: "cuda"
-  precision: "fp32"
-
+  device: cuda
+  precision: fp32
 dataset:
-  name: "cifar10"
-  data_dir: "data"
+  name: cifar10
+  data_dir: data
   val_ratio: 0.02
   num_workers: 2
-
 model:
-  name: "resnet18_cifar"
+  name: resnet18_cifar
   num_classes: 10
-
 train:
-  mode: "pgd_at"           # set to "erm" for fastest smoke test
+  mode: pgd_at
   epochs: 2
   batch_size: 128
-  max_batches: 50          # cap training batches per epoch for speed
-  max_val_batches: 10      # cap validation batches
+  max_batches: 50
+  max_val_batches: 10
   log_interval: 10
   optimizer:
-    name: "sgd"
+    name: sgd
     lr: 0.1
     momentum: 0.9
     weight_decay: 0.0005
   scheduler:
-    name: "none"
-
+    name: none
 attack:
   train:
-    name: "pgd"
+    name: pgd
     eps: 0.0313725
     step_size: 0.007843
     num_steps: 2
   val:
-    name: "pgd"
+    name: pgd
     eps: 0.0313725
     step_size: 0.007843
     num_steps: 2
   eval:
-    name: "attack_suite"
+    name: attack_suite
     eps: 0.0313725
     step_size: 0.007843
     num_steps: 2
   autoattack:
     enabled: false
     eps: 0.0313725
-
 logging:
   wandb:
     enabled: true
-    project: "ardg"
-    entity: ""
-  run_name: "colab_test"
-  output_dir: "outputs"
+    project: ardg
+    entity: ''
+  run_name: colab_test
+  output_dir: /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs
