@@ -122,6 +122,7 @@ class Trainer1:
                     "val_acc": val_acc,
                     "val_loss": float(val_metrics.get("loss", 0.0)),
                 },
+                epoch,
             )
 
             # Save best checkpoint
@@ -135,6 +136,7 @@ class Trainer1:
                         "val_acc": val_acc,
                         "val_loss": float(val_metrics.get("loss", 0.0)),
                     },
+                    epoch,
                 )
             if self.scheduler is not None:
                 # Step scheduler with explicit epoch index so cosine decays from first epoch.
@@ -244,7 +246,7 @@ class Trainer1:
         metrics["lr"] = self.optimizer.param_groups[0]["lr"]
         return metrics
 
-    def _save_checkpoint(self, name: str, metrics: Dict[str, float]) -> str:
+    def _save_checkpoint(self, name: str, metrics: Dict[str, float], epoch: int) -> str:
         """Save a model checkpoint.
 
         Args:
@@ -259,7 +261,7 @@ class Trainer1:
         """
         run_dir = get_run_dir(self.cfg)
         ensure_dir(run_dir)
-        ckpt_path = f"{run_dir}/{name}.pt"
+        ckpt_path = f"{run_dir}/{epoch}_{name}.pt"
         torch.save({"model": self.model.state_dict(), "metrics": metrics}, ckpt_path)
         return ckpt_path
 
