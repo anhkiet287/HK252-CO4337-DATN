@@ -1,0 +1,38 @@
+experiment:
+  seed: 42
+  device: "cuda"
+  deterministic: true
+
+dataset:
+  name: "cifar10"
+  data_dir: "data"
+  val_ratio: 0.02
+
+model:
+  name: "vit_b16_cifar"
+  num_classes: 10
+  pretrained: false
+
+train:
+  mode: "rex"
+  epochs: 100
+  batch_size: 128
+  log_interval: 50
+  optimizer:
+    name: "sgd"
+    lr: 0.1
+    momentum: 0.9
+    weight_decay: 0.0005
+  scheduler:
+    name: "multistep"
+    milestones: [60, 80]
+    gamma: 0.1
+  rex:
+    lambda: 1.0
+    num_splits: 2
+
+logging:
+  wandb:
+    enabled: false
+  run_name: "vit_b16_rex"
+  output_dir: "outputs"
