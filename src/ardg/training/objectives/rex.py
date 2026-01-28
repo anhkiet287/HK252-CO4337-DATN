@@ -8,15 +8,33 @@ import torch
 
 from ardg.training.losses import compute_loss
 from ardg.training.objectives.base import Objective
+from ardg.attacks.attack_suite import build_train_attack
 
 
 class REx(Objective):
     """REx with per-batch environment splits."""
 
-    def __init__(self, cfg: Dict[str, Any]) -> None:
+    def __init__(self, cfg: Dict[str, Any], model: Any | None = None) -> None:
         rex_cfg = cfg.get("train", {}).get("rex", {})
         self.lambda_rex = float(rex_cfg.get("lambda", 1.0))
         self.num_splits = int(rex_cfg.get("num_splits", 2))
+        self.attack = None
+        if cfg["train"].get("adv_training", False) and model is not None:
+            self.attack = build_train_attack(cfg, model)
+
+    def preprocess_batch(self, batch: Any, model: Any) -> Any:
+        if self.attack is None:
+            return batch
+        images, labels = _unpack_batch(batch)
+        model.eval()
+        adv = self.attack(images, labels)
+        model.train()
+        adv = adv.detach()
+        if isinstance(batch, dict):
+            newb = dict(batch)
+            newb["x"] = adv
+            return newb
+        return adv, labels
 
     def loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
         images, labels = _unpack_batch(batch)

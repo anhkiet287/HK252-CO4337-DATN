@@ -1,21 +1,23 @@
 experiment:
   seed: 42
   device: cuda
+  precision: fp32
   deterministic: true
 dataset:
   name: cifar10
-  data_dir: data
+  data_dir: /content/drive/MyDrive/ardg/data
   val_ratio: 0.02
+  num_workers: 8
+  augmentation: randaugment
 model:
-  name: vit_b16_cifar
+  name: resnet18_cifar
   num_classes: 10
-  pretrained: false
 train:
   mode: groupdro_plus
-  epochs: 100
-  batch_size: 128
-  log_interval: 50
   adv_training: true
+  epochs: 100
+  batch_size: 256
+  log_interval: 50
   optimizer:
     name: sgd
     lr: 0.1
@@ -38,10 +40,23 @@ attack:
     eps: 0.0313725
     step_size: 0.007843
     num_steps: 7
+  val:
+    name: pgd
+    eps: 0.0313725
+    step_size: 0.007843
+    num_steps: 20
+  eval:
+    name: attack_suite
+    eps: 0.0313725
+    step_size: 0.007843
+    num_steps: 20
+  autoattack:
+    enabled: true
+    eps: 0.0313725
 logging:
   wandb:
     enabled: true
     project: ardg
     entity: ''
-  run_name: vit_b16_groupdro_plus
+  run_name: resnet18_colab_groupdro_plus_at
   output_dir: /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs

@@ -1,6 +1,6 @@
 """Shared experiment wiring utilities."""
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 
@@ -13,11 +13,12 @@ from ardg.utils.logging import init_wandb, log_metrics, setup_logging
 from ardg.utils.seed import set_seed
 
 
-def setup_run(cfg_path: str) -> Tuple[Dict[str, Any], Any, Any, str]:
+def setup_run(cfg_path: str, run_name_suffix: Optional[str] = None) -> Tuple[Dict[str, Any], Any, Any, str]:
     """Load config and initialize run essentials.
 
     Args:
         cfg_path: Path to the YAML config file.
+        run_name_suffix: Optional suffix to append to logging.run_name (e.g., "eval").
 
     Returns:
         Tuple of (cfg, logger, wandb_run, device).
@@ -27,6 +28,14 @@ def setup_run(cfg_path: str) -> Tuple[Dict[str, Any], Any, Any, str]:
     cfg.setdefault("experiment", {})["platform"] = platform
     deterministic = cfg.get("experiment", {}).get("deterministic", True)
     set_seed(cfg["experiment"]["seed"], deterministic=deterministic)
+
+    if run_name_suffix:
+        log_cfg = cfg.setdefault("logging", {}).setdefault("run_name", "")
+        if log_cfg:
+            cfg["logging"]["run_name"] = f"{log_cfg}_{run_name_suffix}"
+        else:
+            cfg["logging"]["run_name"] = run_name_suffix
+
     logger = setup_logging(name=cfg.get("logging", {}).get("run_name"))
     run = init_wandb(cfg)
     device = cfg["experiment"].get("device", "cpu")

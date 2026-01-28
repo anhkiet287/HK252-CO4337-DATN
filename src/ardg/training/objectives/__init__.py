@@ -20,9 +20,9 @@ def build_objective(cfg: Dict[str, Any], model: Any) -> Objective:
     if mode == "pgd_at":
         return PGDAT(cfg, model)
     if mode == "rex":
-        return REx(cfg)
+        return REx(cfg, model)
     if mode in {"groupdro", "group_dro"}:
-        return GroupDRO(cfg)
+        return GroupDRO(cfg, model)
     if mode in {"groupdro_plus", "groupdro++"}:
         return GroupDROPlus(cfg, model)
     raise ValueError(f"Unsupported train.mode for trainer1: {cfg['train']['mode']}")

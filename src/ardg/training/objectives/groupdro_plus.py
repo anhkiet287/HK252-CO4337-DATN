@@ -9,6 +9,7 @@ import torch
 from ardg.training.cluster_utils import run_kmeans
 from ardg.training.losses import compute_loss
 from ardg.training.objectives.base import Objective
+from ardg.attacks.attack_suite import build_train_attack
 
 
 class GroupDROPlus(Objective):
@@ -21,6 +22,9 @@ class GroupDROPlus(Objective):
         self.lambda_reg = float(gd_cfg.get("lambda_reg", 0.5))
         self.gamma = float(gd_cfg.get("gamma", 1.0))
         self.q: torch.Tensor | None = None
+        self.attack = None
+        if cfg["train"].get("adv_training", False):
+            self.attack = build_train_attack(cfg, model)
 
     def _maybe_init_q(self, num_groups: int, device: torch.device) -> None:
         if self.q is None or self.q.numel() != num_groups:
@@ -28,6 +32,10 @@ class GroupDROPlus(Objective):
 
     def loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
         images, labels = _unpack_batch(batch)
+        if self.attack is not None:
+            model.eval()
+            images = self.attack(images, labels).detach()
+            model.train()
         device = labels.device
 
         logits = model(images)

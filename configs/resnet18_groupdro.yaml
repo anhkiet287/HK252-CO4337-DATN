@@ -14,6 +14,7 @@ train:
   epochs: 100
   batch_size: 128
   log_interval: 50
+  adv_training: true
   optimizer:
     name: sgd
     lr: 0.1
@@ -25,6 +26,12 @@ train:
     eta_min: 0.0
   groupdro:
     eta: 0.02
+attack:
+  train:
+    name: pgd
+    eps: 0.0313725
+    step_size: 0.007843
+    num_steps: 7
 logging:
   wandb:
     enabled: true

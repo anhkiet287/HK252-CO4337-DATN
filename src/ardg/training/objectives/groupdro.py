@@ -8,15 +8,34 @@ import torch
 
 from ardg.training.losses import compute_loss
 from ardg.training.objectives.base import Objective
+from ardg.attacks.attack_suite import build_train_attack
 
 
 class GroupDRO(Objective):
     """Implements multiplicative weight updates over groups."""
 
-    def __init__(self, cfg: Dict[str, Any]) -> None:
+    def __init__(self, cfg: Dict[str, Any], model: Any | None = None) -> None:
         gd_cfg = cfg.get("train", {}).get("groupdro", {})
         self.eta = float(gd_cfg.get("eta", 0.02))
         self.q: torch.Tensor | None = None
+        self.attack = None
+        if cfg["train"].get("adv_training", False) and model is not None:
+            self.attack = build_train_attack(cfg, model)
+
+    def preprocess_batch(self, batch: Any, model: Any) -> Any:
+        if self.attack is None:
+            return batch
+        images, labels, groups = _unpack_batch(batch)
+        model.eval()
+        adv = self.attack(images, labels)
+        model.train()
+        adv = adv.detach()
+        if isinstance(batch, dict):
+            newb = dict(batch)
+            newb["x"] = adv
+            newb["g"] = groups
+            return newb
+        return adv, labels, groups
 
     def _maybe_init_q(self, num_groups: int, device: torch.device) -> None:
         if self.q is None or self.q.numel() != num_groups:

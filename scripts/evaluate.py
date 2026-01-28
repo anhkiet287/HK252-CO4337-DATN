@@ -2,17 +2,18 @@
 
 import argparse
 import time
+from pathlib import Path
 
 from ardg.attacks.attack_suite import build_eval_attacks
 from ardg.attacks.autoattack import run_autoattack
 from ardg.config import DEFAULT_CONFIG_PATH
-from ardg.evaluation.evaluator import evaluate_suite
+from ardg.evaluation.evaluator import evaluate_suite, evaluate_clean
 from ardg.experiments.common import (
     build_loaders,
     load_model_from_checkpoint,
-    run_clean_eval,
     setup_run,
 )
+from ardg.utils.paths import get_run_dir
 from ardg.utils.logging import log_metrics
 
 
@@ -20,7 +21,12 @@ def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Evaluate a trained model.")
     parser.add_argument("--config", default=DEFAULT_CONFIG_PATH, help="Path to YAML config.")
-    parser.add_argument("--checkpoint", required=True, help="Path to model checkpoint.")
+    parser.add_argument("--checkpoint", required=False, help="Path to model checkpoint. If omitted, will try best.pt then last.pt in the run directory.")
+    parser.add_argument(
+        "--splits",
+        default="val,test",
+        help="Comma-separated list of splits to evaluate (choose from val,test). Default: val,test",
+    )
     return parser.parse_args()
 
 
@@ -28,31 +34,50 @@ def main() -> None:
     """Run evaluation on clean and adversarial inputs."""
     # Parsing arguments and loading config.
     args = parse_args()
-    cfg, logger, _, device = setup_run(args.config)
+    cfg, logger, _, device = setup_run(args.config, run_name_suffix="eval")
 
     # Building model and loading checkpoint.
-    model = load_model_from_checkpoint(cfg, args.checkpoint, device)
+    ckpt_path = args.checkpoint
+    if ckpt_path is None:
+        run_dir = Path(get_run_dir(cfg))
+        cand = [run_dir / "best.pt", run_dir / "last.pt"]
+        ckpt_path = next((str(p) for p in cand if p.exists()), None)
+        if ckpt_path is None:
+            raise FileNotFoundError(f"No checkpoint provided and none found in {run_dir} (looked for best.pt / last.pt).")
+    model = load_model_from_checkpoint(cfg, ckpt_path, device)
 
     # Building data loaders and attacks.
     _, val_loader, test_loader = build_loaders(cfg)
-    eval_enabled = cfg.get("attack", {}).get("eval", {}).get("enabled", True)
-    attacks = build_eval_attacks(cfg, model) if eval_enabled else {}
+    has_attack_block = "attack" in cfg
+    eval_enabled = cfg.get("attack", {}).get("eval", {}).get("enabled", has_attack_block)
+    attacks = build_eval_attacks(cfg, model) if (has_attack_block and eval_enabled) else {}
+
+    requested = {s.strip() for s in args.splits.split(",") if s.strip()}
+    split_loaders = {"val": val_loader, "test": test_loader}
 
     # Running evaluation.
     start = time.perf_counter()
-    base_step = 0
-    step_map = {"val": base_step, "test": base_step + 1}
-    run_clean_eval(model, val_loader, test_loader, device, logger, step=base_step)
-    for split_name, loader in (("val", val_loader), ("test", test_loader)):
-        
-        # Evaluate on adversarial inputs
+    step = 0
+    for split_name in ("val", "test"):
+        if split_name not in requested:
+            continue
+        loader = split_loaders[split_name]
+
+        # Clean eval
+        clean_metrics = evaluate_clean(model, loader, device)
+        clean_metrics["device"] = str(device)
+        log_metrics(logger, clean_metrics, step=step, split=f"{split_name}_clean")
+        step += 1
+
+        # Adversarial eval
         if attacks:
             attack_metrics = evaluate_suite(model, loader, attacks, device)
             for name, metrics in attack_metrics.items():
                 metrics["device"] = str(device)
-                log_metrics(logger, metrics, step=step_map[split_name], split=f"{split_name}_{name}")
+                log_metrics(logger, metrics, step=step, split=f"{split_name}_{name}")
+            step += 1
 
-        # Optional AutoAttack evaluation
+        # Optional AutoAttack eval
         if cfg.get("attack", {}).get("autoattack", {}).get("enabled", False):
             autoattack_metrics = run_autoattack(
                 model,
@@ -61,10 +86,11 @@ def main() -> None:
                 device,
             )
             autoattack_metrics["device"] = str(device)
-            log_metrics(logger, autoattack_metrics, step=step_map[split_name], split=f"{split_name}_autoattack")
+            log_metrics(logger, autoattack_metrics, step=step, split=f"{split_name}_autoattack")
+            step += 1
 
     elapsed = time.perf_counter() - start
-    log_metrics(logger, {"time_sec": elapsed, "device": str(device)}, step=base_step + 2, split="eval_runtime")
+    log_metrics(logger, {"time_sec": elapsed, "device": str(device)}, step=step, split="eval_runtime")
 
 
 if __name__ == "__main__":
