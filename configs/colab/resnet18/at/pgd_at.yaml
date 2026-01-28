@@ -31,7 +31,7 @@ attack:
     name: pgd
     eps: 0.0313725
     step_size: 0.007843
-    num_steps: 7
+    num_steps: 10
   val:
     name: pgd
     eps: 0.0313725

@@ -46,8 +46,10 @@ def main() -> None:
         if run_name.endswith("_eval"):
             base_name = run_name[: -len("_eval")]
             cand_dirs.append(run_dir.parent / base_name)
+        tried = []
         for d in cand_dirs:
             for cand in (d / "best.pt", d / "last.pt"):
+                tried.append(str(cand))
                 if cand.exists():
                     ckpt_path = str(cand)
                     break
@@ -55,7 +57,7 @@ def main() -> None:
                 break
         if ckpt_path is None:
             raise FileNotFoundError(
-                f"No checkpoint provided and none found in {cand_dirs} (best.pt / last.pt)"
+                f"No checkpoint provided and none found. Tried paths: {tried}"
             )
 
     model = load_model_from_checkpoint(cfg, ckpt_path, device)
