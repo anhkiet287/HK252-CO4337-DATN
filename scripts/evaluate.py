@@ -41,12 +41,22 @@ def main() -> None:
     ckpt_path = args.checkpoint
     if ckpt_path is None:
         run_dir = Path(get_run_dir(cfg))
-        for cand in (run_dir / "best.pt", run_dir / "last.pt"):
-            if cand.exists():
-                ckpt_path = str(cand)
+        cand_dirs = [run_dir]
+        run_name = cfg.get("logging", {}).get("run_name", "")
+        if run_name.endswith("_eval"):
+            base_name = run_name[: -len("_eval")]
+            cand_dirs.append(run_dir.parent / base_name)
+        for d in cand_dirs:
+            for cand in (d / "best.pt", d / "last.pt"):
+                if cand.exists():
+                    ckpt_path = str(cand)
+                    break
+            if ckpt_path is not None:
                 break
         if ckpt_path is None:
-            raise FileNotFoundError(f"No checkpoint provided and none found in {run_dir} (best.pt / last.pt)")
+            raise FileNotFoundError(
+                f"No checkpoint provided and none found in {cand_dirs} (best.pt / last.pt)"
+            )
 
     model = load_model_from_checkpoint(cfg, ckpt_path, device)
 
