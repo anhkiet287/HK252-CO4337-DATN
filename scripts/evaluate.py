@@ -1,4 +1,4 @@
-"""Evaluate a trained model on clean and adversarial inputs."""
+"""Evaluate a trained model on clean and adversarial inputs (config-driven)."""
 
 import argparse
 import time
@@ -18,66 +18,76 @@ from ardg.utils.logging import log_metrics
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Evaluate a trained model.")
     parser.add_argument("--config", default=DEFAULT_CONFIG_PATH, help="Path to YAML config.")
-    parser.add_argument("--checkpoint", required=False, help="Path to model checkpoint. If omitted, will try best.pt then last.pt in the run directory.")
+    parser.add_argument(
+        "--checkpoint",
+        required=False,
+        help="Path to model checkpoint. If omitted, tries best.pt then last.pt in run dir.",
+    )
     parser.add_argument(
         "--splits",
-        default="val,test",
-        help="Comma-separated list of splits to evaluate (choose from val,test). Default: val,test",
+        default="test",
+        help="Comma-separated splits to evaluate (subset of val,test). Default: test",
     )
     return parser.parse_args()
 
 
 def main() -> None:
-    """Run evaluation on clean and adversarial inputs."""
-    # Parsing arguments and loading config.
     args = parse_args()
-    cfg, logger, _, device = setup_run(args.config, run_name_suffix="eval")
+    cfg, logger, run, device = setup_run(args.config, run_name_suffix="eval")
 
-    # Building model and loading checkpoint.
+    # Resolve checkpoint
     ckpt_path = args.checkpoint
     if ckpt_path is None:
         run_dir = Path(get_run_dir(cfg))
-        cand = [run_dir / "best.pt", run_dir / "last.pt"]
-        ckpt_path = next((str(p) for p in cand if p.exists()), None)
+        for cand in (run_dir / "best.pt", run_dir / "last.pt"):
+            if cand.exists():
+                ckpt_path = str(cand)
+                break
         if ckpt_path is None:
-            raise FileNotFoundError(f"No checkpoint provided and none found in {run_dir} (looked for best.pt / last.pt).")
+            raise FileNotFoundError(f"No checkpoint provided and none found in {run_dir} (best.pt / last.pt)")
+
     model = load_model_from_checkpoint(cfg, ckpt_path, device)
 
-    # Building data loaders and attacks.
+    # Data + attacks
     _, val_loader, test_loader = build_loaders(cfg)
-    has_attack_block = "attack" in cfg
-    eval_enabled = cfg.get("attack", {}).get("eval", {}).get("enabled", has_attack_block)
-    attacks = build_eval_attacks(cfg, model) if (has_attack_block and eval_enabled) else {}
+    has_attack = "attack" in cfg
+    eval_enabled = cfg.get("attack", {}).get("eval", {}).get("enabled", has_attack)
+    attacks = build_eval_attacks(cfg, model) if (has_attack and eval_enabled) else {}
 
     requested = {s.strip() for s in args.splits.split(",") if s.strip()}
     split_loaders = {"val": val_loader, "test": test_loader}
 
-    # Running evaluation.
+    # Eval loop
     start = time.perf_counter()
     step = 0
+    summary_rows = []
     for split_name in ("val", "test"):
         if split_name not in requested:
             continue
         loader = split_loaders[split_name]
+        row = {"split": split_name}
 
-        # Clean eval
+        # Clean
         clean_metrics = evaluate_clean(model, loader, device)
         clean_metrics["device"] = str(device)
         log_metrics(logger, clean_metrics, step=step, split=f"{split_name}_clean")
+        row["clean_acc"] = clean_metrics.get("acc")
+        row["clean_loss"] = clean_metrics.get("loss")
         step += 1
 
-        # Adversarial eval
+        # PGD / eval attacks
         if attacks:
             attack_metrics = evaluate_suite(model, loader, attacks, device)
             for name, metrics in attack_metrics.items():
                 metrics["device"] = str(device)
                 log_metrics(logger, metrics, step=step, split=f"{split_name}_{name}")
+                row[f"{name}_acc"] = metrics.get("acc")
+                row[f"{name}_loss"] = metrics.get("loss")
             step += 1
 
-        # Optional AutoAttack eval
+        # AutoAttack
         if cfg.get("attack", {}).get("autoattack", {}).get("enabled", False):
             autoattack_metrics = run_autoattack(
                 model,
@@ -87,10 +97,43 @@ def main() -> None:
             )
             autoattack_metrics["device"] = str(device)
             log_metrics(logger, autoattack_metrics, step=step, split=f"{split_name}_autoattack")
+            row["autoattack_acc"] = autoattack_metrics.get("acc")
             step += 1
+
+        summary_rows.append(row)
 
     elapsed = time.perf_counter() - start
     log_metrics(logger, {"time_sec": elapsed, "device": str(device)}, step=step, split="eval_runtime")
+
+    # W&B summary/table
+    try:
+        import wandb  # type: ignore
+
+        if run is not None and getattr(wandb, "run", None) is not None:
+            cols = ["split", "clean_acc", "clean_loss", "pgd_acc", "pgd_loss", "autoattack_acc", "time_sec"]
+            table = wandb.Table(columns=cols)
+            for row in summary_rows:
+                table.add_data(
+                    row.get("split"),
+                    row.get("clean_acc"),
+                    row.get("clean_loss"),
+                    row.get("pgd_acc"),
+                    row.get("pgd_loss"),
+                    row.get("autoattack_acc"),
+                    elapsed,
+                )
+            wandb.log({"eval/summary_table": table}, step=step)
+            for row in summary_rows:
+                if row.get("split") == "test":
+                    if "pgd_acc" in row:
+                        wandb.run.summary["test_pgd_acc"] = row["pgd_acc"]
+                    if "clean_acc" in row:
+                        wandb.run.summary["test_clean_acc"] = row["clean_acc"]
+                    if "autoattack_acc" in row:
+                        wandb.run.summary["test_autoattack_acc"] = row["autoattack_acc"]
+            wandb.run.summary["eval_time_sec"] = elapsed
+    except ImportError:
+        pass
 
 
 if __name__ == "__main__":
