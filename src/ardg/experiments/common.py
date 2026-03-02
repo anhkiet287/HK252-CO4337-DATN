@@ -1,5 +1,6 @@
 """Shared experiment wiring utilities."""
 
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import torch
@@ -10,6 +11,7 @@ from ardg.data.datasets import get_dataloaders
 from ardg.evaluation.evaluator import evaluate_clean
 from ardg.models.factory import build_model
 from ardg.utils.logging import init_wandb, log_metrics, setup_logging
+from ardg.utils.paths import ensure_dir, get_run_dir
 from ardg.utils.seed import set_seed
 
 
@@ -30,12 +32,19 @@ def _resolve_device(requested: str, logger: Any) -> str:
     return device
 
 
-def setup_run(cfg_path: str, run_name_suffix: Optional[str] = None) -> Tuple[Dict[str, Any], Any, Any, str]:
+def setup_run(
+    cfg_path: str,
+    run_name_suffix: Optional[str] = None,
+    wandb_run_id: Optional[str] = None,
+    wandb_resume: Optional[str] = None,
+) -> Tuple[Dict[str, Any], Any, Any, str]:
     """Load config and initialize run essentials.
 
     Args:
         cfg_path: Path to the YAML config file.
         run_name_suffix: Optional suffix to append to logging.run_name (e.g., "eval").
+        wandb_run_id: Optional W&B run id to resume.
+        wandb_resume: Optional W&B resume mode ("allow"/"must"/"never").
 
     Returns:
         Tuple of (cfg, logger, wandb_run, device).
@@ -56,7 +65,17 @@ def setup_run(cfg_path: str, run_name_suffix: Optional[str] = None) -> Tuple[Dic
     logger = setup_logging(name=cfg.get("logging", {}).get("run_name"))
     device = _resolve_device(cfg.get("experiment", {}).get("device", "cpu"), logger)
     cfg.setdefault("experiment", {})["device"] = device
+    wandb_cfg = cfg.setdefault("logging", {}).setdefault("wandb", {})
+    if wandb_run_id:
+        wandb_cfg["run_id"] = str(wandb_run_id)
+    if wandb_resume:
+        wandb_cfg["resume"] = str(wandb_resume)
     run = init_wandb(cfg)
+    if run is not None and getattr(run, "id", None):
+        wandb_cfg["run_id"] = str(run.id)
+        run_dir = Path(get_run_dir(cfg))
+        ensure_dir(str(run_dir))
+        (run_dir / "wandb_run_id.txt").write_text(str(run.id), encoding="utf-8")
     return cfg, logger, run, device
 
 

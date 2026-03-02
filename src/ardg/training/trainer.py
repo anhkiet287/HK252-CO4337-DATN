@@ -2,6 +2,7 @@
 
 import logging
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import torch
@@ -37,6 +38,9 @@ class Trainer:
         self.max_val_batches = cfg["train"].get("max_val_batches")
         self.log_interval = cfg["train"].get("log_interval", 50)
         self.global_step = 0
+        self.start_epoch = 1
+        wandb_cfg = cfg.get("logging", {}).get("wandb", {})
+        self.wandb_run_id = str(wandb_cfg.get("run_id", "")).strip() or None
 
         opt_cfg = cfg["train"]["optimizer"]
         self.optimizer = torch.optim.SGD(
@@ -84,7 +88,20 @@ class Trainer:
         """Run the full training loop."""
         epochs = self.cfg["train"]["epochs"]
         last_ckpt_path = ""
-        for epoch in range(1, epochs + 1):
+        if self.start_epoch > epochs:
+            self.logger.info(
+                "Resume epoch (%s) is beyond configured epochs (%s). Skipping training.",
+                self.start_epoch,
+                epochs,
+            )
+            run_dir = Path(get_run_dir(self.cfg))
+            last_path = str(run_dir / "last.pt")
+            best_path = self.best_ckpt_path or str(run_dir / "best.pt")
+            if not Path(best_path).exists():
+                best_path = last_path
+            return {"last": last_path, "best": best_path}
+
+        for epoch in range(self.start_epoch, epochs + 1):
             self.logger.info("Starting epoch %s", epoch)
             start = time.perf_counter()
 
@@ -103,16 +120,6 @@ class Trainer:
             except AttributeError:
                 pass
 
-            last_ckpt_path = self._save_checkpoint(
-                "last",
-                {
-                    "epoch": epoch,
-                    "val_acc": val_acc,
-                    "val_loss": float(val_metrics.get("loss", 0.0)),
-                },
-                None,
-            )
-
             if val_acc >= self.best_metric:
                 self.best_metric = val_acc
                 self.best_epoch = epoch
@@ -123,8 +130,18 @@ class Trainer:
                         "val_acc": val_acc,
                         "val_loss": float(val_metrics.get("loss", 0.0)),
                     },
-                    None,
+                    epoch,
                 )
+
+            last_ckpt_path = self._save_checkpoint(
+                "last",
+                {
+                    "epoch": epoch,
+                    "val_acc": val_acc,
+                    "val_loss": float(val_metrics.get("loss", 0.0)),
+                },
+                epoch,
+            )
 
             should_stop = self._update_early_stopping(epoch, val_metrics)
             if self.scheduler is not None:
@@ -138,6 +155,78 @@ class Trainer:
             raise RuntimeError("No checkpoint saved during training.")
         best_path = self.best_ckpt_path or last_ckpt_path
         return {"last": last_ckpt_path, "best": best_path}
+
+    def load_checkpoint(self, ckpt_path: str) -> Dict[str, Any]:
+        """Load training state from checkpoint and prepare resume."""
+        checkpoint = torch.load(ckpt_path, map_location=self.device)
+        if not isinstance(checkpoint, dict):
+            raise ValueError(f"Unsupported checkpoint format at {ckpt_path}.")
+        metrics = checkpoint.get("metrics")
+        if not isinstance(metrics, dict):
+            metrics = {}
+
+        state_dict = checkpoint.get("model") or checkpoint.get("state_dict")
+        if not isinstance(state_dict, dict):
+            raise ValueError(f"Checkpoint at {ckpt_path} has no model state_dict.")
+        self.model.load_state_dict(state_dict)
+
+        if isinstance(checkpoint.get("optimizer"), dict):
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
+        else:
+            self.logger.warning("No optimizer state in checkpoint; optimizer will restart fresh.")
+
+        resumed_epoch = int(checkpoint.get("epoch", metrics.get("epoch", 0)))
+        if self.scheduler is not None:
+            if isinstance(checkpoint.get("scheduler"), dict):
+                self.scheduler.load_state_dict(checkpoint["scheduler"])
+            elif resumed_epoch > 0:
+                # Best-effort fallback for legacy checkpoints without scheduler state.
+                for _ in range(resumed_epoch):
+                    self.scheduler.step()
+
+        if checkpoint.get("global_step") is not None:
+            self.global_step = int(checkpoint["global_step"])
+        else:
+            self.global_step = resumed_epoch * self._steps_per_epoch()
+
+        if checkpoint.get("best_metric") is not None:
+            self.best_metric = float(checkpoint["best_metric"])
+        else:
+            self.best_metric = float(metrics.get("val_acc", self.best_metric))
+        self.best_epoch = int(checkpoint.get("best_epoch", resumed_epoch))
+
+        if checkpoint.get("es_state") and isinstance(checkpoint["es_state"], dict):
+            es_state = checkpoint["es_state"]
+            if es_state.get("best_metric") is not None:
+                self.es_best_metric = float(es_state["best_metric"])
+            if es_state.get("bad_epochs") is not None:
+                self.es_bad_epochs = int(es_state["bad_epochs"])
+            if es_state.get("enabled") is not None:
+                self.es_enabled = bool(es_state["enabled"])
+
+        ckpt_run_id = checkpoint.get("wandb_run_id")
+        if ckpt_run_id:
+            self.wandb_run_id = str(ckpt_run_id)
+
+        run_dir = Path(get_run_dir(self.cfg))
+        best_path = run_dir / "best.pt"
+        if best_path.exists():
+            self.best_ckpt_path = str(best_path)
+
+        self.start_epoch = max(1, resumed_epoch + 1)
+        self.logger.info(
+            "Resumed from %s (epoch=%s, next_epoch=%s, global_step=%s).",
+            ckpt_path,
+            resumed_epoch,
+            self.start_epoch,
+            self.global_step,
+        )
+        return {
+            "epoch": resumed_epoch,
+            "next_epoch": self.start_epoch,
+            "global_step": self.global_step,
+            "wandb_run_id": self.wandb_run_id,
+        }
 
     def _update_early_stopping(self, epoch: int, val_metrics: Dict[str, float]) -> bool:
         if not self.es_enabled:
@@ -244,12 +333,35 @@ class Trainer:
 
     def _save_checkpoint(self, name: str, metrics: Dict[str, float], epoch: int | None) -> str:
         """Save a model checkpoint."""
-        del epoch
+        epoch_value = int(epoch if epoch is not None else metrics.get("epoch", 0))
         run_dir = get_run_dir(self.cfg)
         ensure_dir(run_dir)
         ckpt_path = f"{run_dir}/{name}.pt"
-        torch.save({"model": self.model.state_dict(), "metrics": metrics}, ckpt_path)
+        state = {
+            "model": self.model.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "scheduler": self.scheduler.state_dict() if self.scheduler is not None else None,
+            "metrics": metrics,
+            "epoch": epoch_value,
+            "global_step": int(self.global_step),
+            "best_metric": float(self.best_metric),
+            "best_epoch": int(self.best_epoch),
+            "es_state": {
+                "enabled": bool(self.es_enabled),
+                "best_metric": float(self.es_best_metric),
+                "bad_epochs": int(self.es_bad_epochs),
+                "patience": int(self.es_patience),
+            },
+            "wandb_run_id": self.wandb_run_id,
+        }
+        torch.save(state, ckpt_path)
         return ckpt_path
+
+    def _steps_per_epoch(self) -> int:
+        full_steps = len(self.train_loader)
+        if self.max_train_batches:
+            return min(full_steps, int(self.max_train_batches))
+        return full_steps
 
 
 def _to_device(batch: Any, device: torch.device) -> Any:

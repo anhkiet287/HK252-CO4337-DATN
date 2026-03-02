@@ -45,11 +45,18 @@ def init_wandb(cfg: Dict[str, Any]) -> Optional[Any]:
     except ImportError as exc:
         raise ImportError("wandb is enabled but not installed.") from exc
 
+    run_id = wandb_cfg.get("run_id") or None
+    resume = wandb_cfg.get("resume") or None
+    if run_id and resume is None:
+        resume = "allow"
+
     return wandb.init(
         project=wandb_cfg.get("project"),
         entity=wandb_cfg.get("entity") or None,
         name=cfg.get("logging", {}).get("run_name"),
         config=cfg,
+        id=run_id,
+        resume=resume,
     )
 
 
