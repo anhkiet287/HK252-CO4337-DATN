@@ -4,7 +4,7 @@ from typing import Sequence
 
 from ardg.experiments.common import build_loaders, load_model_from_checkpoint, run_clean_eval, setup_run
 from ardg.models.factory import build_model
-from ardg.training.trainer import Trainer
+from ardg.training.trainer1 import Trainer1
 
 
 def run_smoke(cfg_paths: Sequence[str]) -> None:
@@ -38,7 +38,7 @@ def _run_single(cfg_path: str) -> None:
     cfg, logger, run, device = setup_run(cfg_path)
     train_loader, val_loader, test_loader = build_loaders(cfg)
     model = build_model(cfg)
-    trainer = Trainer(
+    trainer = Trainer1(
         cfg,
         model,
         train_loader,

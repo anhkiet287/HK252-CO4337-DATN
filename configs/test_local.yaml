@@ -46,7 +46,7 @@ attack:
     step_size: 0.007843
     num_steps: 1
   autoattack:
-    enabled: false
+    enabled: true
     eps: 0.0313725
 logging:
   wandb:
@@ -54,4 +54,4 @@ logging:
     project: ardg
     entity: ''
   run_name: test_local
-  output_dir: /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs
+  output_dir: runs/test_local

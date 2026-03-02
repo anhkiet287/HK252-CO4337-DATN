@@ -36,14 +36,19 @@ def build_eval_attacks(cfg: Dict[str, Any], model: "nn.Module") -> Dict[str, Any
     """
     model.eval()
     eval_cfg = cfg["attack"]["eval"]
+    pgd20_cfg = eval_cfg.get("pgd20", {})
     attacks: Dict[str, Any] = {}
     base = {"dataset_name": cfg["dataset"]["name"]}
-    attacks["pgd"] = build_pgd_attack(
+    attacks["pgd20"] = build_pgd_attack(
         {
             **base,
-            "eps": eval_cfg.get("eps", cfg["attack"]["val"]["eps"]),
-            "step_size": eval_cfg.get("step_size", cfg["attack"]["val"].get("step_size", 0.007843)),
-            "num_steps": eval_cfg.get("num_steps", cfg["attack"]["val"].get("num_steps", 20)),
+            "eps": pgd20_cfg.get("eps", eval_cfg.get("eps", cfg["attack"]["val"]["eps"])),
+            "step_size": pgd20_cfg.get(
+                "step_size",
+                pgd20_cfg.get("alpha", eval_cfg.get("step_size", cfg["attack"]["val"].get("step_size", 0.007843))),
+            ),
+            "num_steps": int(pgd20_cfg.get("num_steps", pgd20_cfg.get("steps", 20))),
+            "restarts": int(pgd20_cfg.get("restarts", 5)),
         },
         model,
     )

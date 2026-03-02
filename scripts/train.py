@@ -9,7 +9,6 @@ import argparse
 from ardg.config import DEFAULT_CONFIG_PATH
 from ardg.experiments.common import build_loaders, setup_run
 from ardg.models.factory import build_model
-from ardg.training.trainer import Trainer
 from ardg.training.trainer1 import Trainer1
 
 

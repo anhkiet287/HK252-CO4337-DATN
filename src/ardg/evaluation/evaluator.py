@@ -35,6 +35,7 @@ def evaluate_under_attack(model: Any, loader: Any, attack: Any, device: str) -> 
     """Evaluate a classifier under a given adversarial attack."""
     model.eval()
     device_t = torch.device(device)
+    total_loss = 0.0
     total_correct = 0
     total_seen = 0
     for images, labels in loader:
@@ -42,10 +43,13 @@ def evaluate_under_attack(model: Any, loader: Any, attack: Any, device: str) -> 
         labels = labels.to(device_t)
         adv = attack(images, labels)
         logits = model(adv)
+        loss = compute_loss(logits, labels)
+        total_loss += loss.item() * images.size(0)
         total_correct += (logits.argmax(dim=1) == labels).sum().item()
         total_seen += images.size(0)
     return {
         "acc": total_correct / max(total_seen, 1),
+        "loss": total_loss / max(total_seen, 1),
         "n_samples": total_seen,
     }
 

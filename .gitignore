@@ -11,3 +11,5 @@ wandb/
 src/ardg.egg-info
 outputs/
 *.pt
+runs/
+models/*.tar

@@ -20,10 +20,8 @@ def parse_args() -> argparse.Namespace:
         "--configs",
         nargs="+",
         default=[
-            "configs/smoke_cifar10_resnet.yaml",
-            "configs/smoke_mnist_resnet.yaml",
-            "configs/smoke_fashion_mnist_resnet.yaml",
-            "configs/smoke_color_mnist_resnet.yaml",
+            "configs/smoke_quick_resnet18_erm.yaml",
+            "configs/smoke_quick_resnet18_pgd_at.yaml",
         ],
         help="List of config files to run.",
     )

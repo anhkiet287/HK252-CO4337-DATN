@@ -13,6 +13,23 @@ from ardg.utils.logging import init_wandb, log_metrics, setup_logging
 from ardg.utils.seed import set_seed
 
 
+def _resolve_device(requested: str, logger: Any) -> str:
+    """Resolve runtime device; try CUDA first, fallback to CPU on failure."""
+    device = str(requested or "cpu")
+    if device.startswith("cuda"):
+        try:
+            _ = torch.empty(1, device=torch.device(device))
+            return device
+        except Exception as exc:
+            logger.warning(
+                "Failed to initialize %s (%s). Falling back to cpu.",
+                device,
+                exc,
+            )
+            return "cpu"
+    return device
+
+
 def setup_run(cfg_path: str, run_name_suffix: Optional[str] = None) -> Tuple[Dict[str, Any], Any, Any, str]:
     """Load config and initialize run essentials.
 
@@ -37,8 +54,9 @@ def setup_run(cfg_path: str, run_name_suffix: Optional[str] = None) -> Tuple[Dic
             cfg["logging"]["run_name"] = run_name_suffix
 
     logger = setup_logging(name=cfg.get("logging", {}).get("run_name"))
+    device = _resolve_device(cfg.get("experiment", {}).get("device", "cpu"), logger)
+    cfg.setdefault("experiment", {})["device"] = device
     run = init_wandb(cfg)
-    device = cfg["experiment"].get("device", "cpu")
     return cfg, logger, run, device
 
 
