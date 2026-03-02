@@ -16,7 +16,7 @@ model:
   pretrained: false
 
 train:
-  mode: "rex"  # exercises trainer1/objective path
+  mode: "rex"  # exercises objective-based training path
   epochs: 2
   batch_size: 64
   log_interval: 5
@@ -40,5 +40,5 @@ logging:
     enabled: false
     project: "ardg"
     entity: ""
-  run_name: "smoke_local_trainer1_vit_b16"
+  run_name: "smoke_local_objective_vit_b16"
   output_dir: "outputs/smoke_local"

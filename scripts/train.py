@@ -9,7 +9,7 @@ import argparse
 from ardg.config import DEFAULT_CONFIG_PATH
 from ardg.experiments.common import build_loaders, setup_run
 from ardg.models.factory import build_model
-from ardg.training.trainer1 import Trainer1
+from ardg.training.trainer import Trainer
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,7 +38,7 @@ def main() -> None:
     # Building data, model, and trainer components.
     train_loader, val_loader, _ = build_loaders(cfg)
     model = build_model(cfg)
-    trainer = Trainer1(
+    trainer = Trainer(
         cfg,
         model,
         train_loader,

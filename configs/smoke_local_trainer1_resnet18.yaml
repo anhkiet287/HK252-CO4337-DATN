@@ -15,7 +15,7 @@ model:
   num_classes: 10
 
 train:
-  mode: "groupdro"  # exercises trainer1/objective path; uses labels as groups
+  mode: "groupdro"  # exercises objective-based training path; uses labels as groups
   epochs: 2
   batch_size: 64
   log_interval: 5
@@ -38,5 +38,5 @@ logging:
     enabled: false
     project: "ardg"
     entity: ""
-  run_name: "smoke_local_trainer1_resnet18"
+  run_name: "smoke_local_objective_resnet18"
   output_dir: "outputs/smoke_local"

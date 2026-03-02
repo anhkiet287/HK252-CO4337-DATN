@@ -1,21 +1,20 @@
-"""Training loop for ERM and PGD-AT."""
+"""Trainer with pluggable objectives (ERM/PGD/REx/GroupDRO/GroupDRO++)."""
 
 import logging
 import time
 from typing import Any, Dict, Optional
 
 import torch
-from torch import nn
 from torch.utils.data import DataLoader
 
-from ardg.attacks.attack_suite import build_train_attack
 from ardg.training.losses import compute_loss
+from ardg.training.objectives import build_objective
 from ardg.utils.logging import log_metrics
 from ardg.utils.paths import ensure_dir, get_run_dir
 
 
 class Trainer:
-    """Trainer for ERM and PGD-AT training."""
+    """Trainer that delegates loss logic to Objective registry."""
 
     def __init__(
         self,
@@ -26,32 +25,19 @@ class Trainer:
         device: Optional[str] = None,
         logger: Optional[logging.Logger] = None,
     ) -> None:
-        """Initialize the trainer.
+        """Initialize the trainer."""
+        self.cfg = cfg
+        self.model = model
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.device = torch.device(device or "cpu")
+        self.model.to(self.device)
+        self.logger = logger or logging.getLogger(__name__)
+        self.max_train_batches = cfg["train"].get("max_batches")
+        self.max_val_batches = cfg["train"].get("max_val_batches")
+        self.log_interval = cfg["train"].get("log_interval", 50)
+        self.global_step = 0
 
-        Args:
-            cfg: Configuration dictionary.
-            model: Model to train.
-            train_loader: Training data loader.
-            val_loader: Validation data loader.
-            device: Device string such as "cpu" or "cuda".
-            logger: Logger instance.
-
-        Raises:
-            KeyError: If required config keys are missing.
-        """
-        self.cfg = cfg # store config
-        self.model = model # load model
-        self.train_loader = train_loader # load training data
-        self.val_loader = val_loader # load validation data
-        self.device = torch.device(device or "cpu") # set device
-        self.model.to(self.device) # move model to device
-        self.logger = logger or logging.getLogger(__name__) # set up logger
-        self.max_train_batches = cfg["train"].get("max_batches") # max training batches
-        self.max_val_batches = cfg["train"].get("max_val_batches") # max validation batches
-        self.log_interval = cfg["train"].get("log_interval", 50) # logging interval
-        self.global_step = 0 # initialize global step
-
-        # Set up optimizer and scheduler
         opt_cfg = cfg["train"]["optimizer"]
         self.optimizer = torch.optim.SGD(
             model.parameters(),
@@ -67,41 +53,56 @@ class Trainer:
                 milestones=sched_cfg.get("milestones", []),
                 gamma=sched_cfg.get("gamma", 0.1),
             )
+        if sched_cfg.get("name") == "cosine":
+            t_max = sched_cfg.get("t_max", cfg["train"].get("epochs", 100))
+            eta_min = sched_cfg.get("eta_min", 0.0)
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer,
+                T_max=t_max,
+                eta_min=eta_min,
+            )
 
-        # Set up adversarial attack if needed
-        self.attack = build_train_attack(cfg, model) if cfg["train"]["mode"] == "pgd_at" else None
+        self.objective = build_objective(cfg, model)
         self.best_metric = float("-inf")
         self.best_epoch = 0
         self.best_ckpt_path: Optional[str] = None
 
+        es_cfg = cfg["train"].get("early_stopping", {})
+        self.es_enabled = bool(es_cfg.get("enabled", False))
+        self.es_patience = int(es_cfg.get("patience", 10))
+        self.es_min_delta = float(es_cfg.get("min_delta", 0.0))
+        self.es_warmup_epochs = int(es_cfg.get("warmup_epochs", 0))
+        self.es_metric_key = _normalize_es_metric_key(es_cfg.get("metric", "acc"))
+        mode_default = "min" if self.es_metric_key == "loss" else "max"
+        self.es_mode = str(es_cfg.get("mode", mode_default)).lower()
+        if self.es_mode not in {"min", "max"}:
+            raise ValueError(f"Unsupported early_stopping.mode: {self.es_mode!r}. Use 'min' or 'max'.")
+        self.es_best_metric = float("inf") if self.es_mode == "min" else float("-inf")
+        self.es_bad_epochs = 0
+
     def train(self) -> Dict[str, str]:
-        """Run the full training loop.
-
-        Returns:
-            Mapping with "last" and "best" checkpoint paths.
-
-        Raises:
-            RuntimeError: If no checkpoint is saved during training.
-        """
-        epochs = self.cfg["train"]["epochs"] # total number of epochs
-        last_ckpt_path = "" # initialize last checkpoint path
-        for epoch in range(1, epochs + 1): # loop over epochs
+        """Run the full training loop."""
+        epochs = self.cfg["train"]["epochs"]
+        last_ckpt_path = ""
+        for epoch in range(1, epochs + 1):
             self.logger.info("Starting epoch %s", epoch)
-            start = time.perf_counter() # start timer
+            start = time.perf_counter()
 
-            # Run training for one epoch
             train_metrics = self.train_one_epoch(epoch)
             train_metrics["time_sec"] = time.perf_counter() - start
             train_metrics["device"] = str(self.device)
-            log_metrics(self.logger, train_metrics, self.global_step, "train") # log training metrics
+            log_metrics(self.logger, train_metrics, self.global_step, "train")
 
-            # Run validation
             val_metrics = self.validate(epoch)
             val_metrics["device"] = str(self.device)
-            log_metrics(self.logger, val_metrics, self.global_step, "val") # log validation metrics
-            val_acc = float(val_metrics.get("acc", 0.0)) 
+            log_metrics(self.logger, val_metrics, self.global_step, "val")
+            val_acc = float(val_metrics.get("acc", 0.0))
 
-            # Save last checkpoint
+            try:
+                self.objective.on_epoch_end(epoch, {"train": self.train_loader, "val": self.val_loader})
+            except AttributeError:
+                pass
+
             last_ckpt_path = self._save_checkpoint(
                 "last",
                 {
@@ -109,9 +110,9 @@ class Trainer:
                     "val_acc": val_acc,
                     "val_loss": float(val_metrics.get("loss", 0.0)),
                 },
+                None,
             )
 
-            # Save best checkpoint
             if val_acc >= self.best_metric:
                 self.best_metric = val_acc
                 self.best_epoch = epoch
@@ -122,72 +123,101 @@ class Trainer:
                         "val_acc": val_acc,
                         "val_loss": float(val_metrics.get("loss", 0.0)),
                     },
+                    None,
                 )
+
+            should_stop = self._update_early_stopping(epoch, val_metrics)
             if self.scheduler is not None:
                 self.scheduler.step()
             self.logger.info("Finished epoch %s in %.2fs", epoch, train_metrics["time_sec"])
+            if should_stop:
+                self.logger.info("Stopping training early at epoch %s.", epoch)
+                break
+
         if not last_ckpt_path:
             raise RuntimeError("No checkpoint saved during training.")
         best_path = self.best_ckpt_path or last_ckpt_path
         return {"last": last_ckpt_path, "best": best_path}
 
+    def _update_early_stopping(self, epoch: int, val_metrics: Dict[str, float]) -> bool:
+        if not self.es_enabled:
+            return False
+
+        metric_value = val_metrics.get(self.es_metric_key)
+        if metric_value is None:
+            self.logger.warning(
+                "early_stopping.metric=%s not found in val metrics; disabling early stopping.",
+                self.es_metric_key,
+            )
+            self.es_enabled = False
+            return False
+
+        current = float(metric_value)
+        if self._is_es_improved(current):
+            self.es_best_metric = current
+            self.es_bad_epochs = 0
+        elif epoch > self.es_warmup_epochs:
+            self.es_bad_epochs += 1
+
+        self.logger.info(
+            "early_stopping metric=%s current=%.6f best=%.6f bad_epochs=%d/%d",
+            self.es_metric_key,
+            current,
+            self.es_best_metric,
+            self.es_bad_epochs,
+            self.es_patience,
+        )
+        return epoch > self.es_warmup_epochs and self.es_bad_epochs >= self.es_patience
+
+    def _is_es_improved(self, current: float) -> bool:
+        if self.es_mode == "min":
+            return current < (self.es_best_metric - self.es_min_delta)
+        return current > (self.es_best_metric + self.es_min_delta)
+
     def train_one_epoch(self, epoch: int) -> Dict[str, float]:
-        """Run one training epoch.
+        """Run one training epoch."""
+        del epoch
+        self.model.train()
 
-        Args:
-            epoch: 1-based epoch index.
-
-        Returns:
-            Dictionary with averaged loss and accuracy.
-
-        Raises:
-            RuntimeError: If a training step fails.
-        """
-        self.model.train() # set model to training mode
-
-        # Initialize metrics
         total_loss = 0.0
         total_correct = 0
         total_seen = 0
 
-        for step_idx, batch in enumerate(self.train_loader, start=1): # loop over training batches
-            self.global_step += 1 # increment global step
-            metrics = self._train_step(batch) # perform training step
-            total_loss += metrics["loss"] * metrics["batch_size"] # accumulate loss
-            total_correct += metrics["correct"] # accumulate correct predictions
-            total_seen += metrics["batch_size"] # accumulate seen samples
+        for step_idx, batch in enumerate(self.train_loader, start=1):
+            self.global_step += 1
+            metrics = self._train_step(batch)
+            total_loss += metrics["loss"] * metrics["batch_size"]
+            total_correct += metrics["correct"]
+            total_seen += metrics["batch_size"]
 
-            if self.log_interval and step_idx % self.log_interval == 0: # log at intervals
+            if self.log_interval and step_idx % self.log_interval == 0:
                 batch_metrics = {
-                    "loss": metrics["loss"], 
+                    "loss": metrics["loss"],
                     "acc": metrics["acc"],
                     "lr": metrics["lr"],
                 }
                 log_metrics(self.logger, batch_metrics, self.global_step, "train_batch")
             if self.max_train_batches and step_idx >= self.max_train_batches:
                 break
-        avg_loss = total_loss / max(total_seen, 1) # compute average loss
-        acc = total_correct / max(total_seen, 1) # compute accuracy
-        return {"loss": avg_loss, "acc": acc} 
+
+        avg_loss = total_loss / max(total_seen, 1)
+        acc = total_correct / max(total_seen, 1)
+        current_lr = self.optimizer.param_groups[0]["lr"]
+        return {"loss": avg_loss, "acc": acc, "lr": current_lr}
 
     @torch.no_grad()
     def validate(self, epoch: int) -> Dict[str, float]:
-        """Run validation for one epoch.
-
-        Args:
-            epoch: 1-based epoch index.
-
-        Returns:
-            Dictionary with averaged loss and accuracy.
-
-        Raises:
-            RuntimeError: If validation fails.
-        """
+        """Run validation for one epoch."""
+        del epoch
         self.model.eval()
         total_loss = 0.0
         total_correct = 0
         total_seen = 0
-        for step_idx, (images, labels) in enumerate(self.val_loader, start=1):
+        for step_idx, batch in enumerate(self.val_loader, start=1):
+            if isinstance(batch, dict):
+                images, labels = batch["x"], batch["y"]
+            else:
+                images, labels = batch
             images = images.to(self.device)
             labels = labels.to(self.device)
             logits = self.model(images)
@@ -200,74 +230,40 @@ class Trainer:
         return {"loss": total_loss / max(total_seen, 1), "acc": total_correct / max(total_seen, 1)}
 
     def _train_step(self, batch: Any) -> Dict[str, float]:
-        """Run a single training step.
+        """Run a single training step."""
+        batch = _to_device(batch, self.device)
+        batch = self.objective.preprocess_batch(batch, self.model)
 
-        Args:
-            batch: Batch tuple of images and labels.
+        self.optimizer.zero_grad(set_to_none=True)
+        loss, metrics = self.objective.loss(self.model, batch)
+        loss.backward()
+        self.optimizer.step()
 
-        Returns:
-            Dictionary of per-batch metrics.
+        metrics["lr"] = self.optimizer.param_groups[0]["lr"]
+        return metrics
 
-        Raises:
-            RuntimeError: If the optimization step fails.
-        """
-        images, labels = batch  # unpack batch, shape: (B, C, H, W), (B,)
-        images = images.to(self.device) # move images to device , shape: (B, C, H, W)
-        labels = labels.to(self.device) # move labels to device , shape: (B,)
-
-        if self.attack is not None:
-            images = self._make_adv_batch(images, labels) # generate adversarial examples, shape: (B, C, H, W)
-
-        self.optimizer.zero_grad(set_to_none=True) # zero gradients
-
-        logits = self.model(images) # forward pass, shape: (B, num_classes)
-
-        loss = compute_loss(logits, labels) # compute loss
-        loss.backward() # backward pass
-        self.optimizer.step() # optimization step
-
-        correct = (logits.argmax(dim=1) == labels).sum().item() # count correct predictions
-        return {
-            "loss": float(loss.item()),
-            "acc": correct / max(images.size(0), 1), # size(0) is batch size
-            "correct": correct,
-            "batch_size": images.size(0),
-            "lr": self.optimizer.param_groups[0]["lr"],
-        }
-
-    def _make_adv_batch(self, images: Any, labels: Any) -> Any:
-        """Generate adversarial examples for PGD-AT.
-
-        Args:
-            images: Input images tensor.
-            labels: Ground-truth labels.
-
-        Returns:
-            Adversarially perturbed images.
-
-        Raises:
-            RuntimeError: If the adversarial attack fails.
-        """
-        self.model.eval()
-        adv = self.attack(images, labels)
-        self.model.train()
-        return adv.detach()
-
-    def _save_checkpoint(self, name: str, metrics: Dict[str, float]) -> str:
-        """Save a model checkpoint.
-
-        Args:
-            name: Checkpoint name (e.g. "last", "best").
-            metrics: Metrics to store alongside the model state.
-
-        Returns:
-            Path to the saved checkpoint.
-
-        Raises:
-            RuntimeError: If saving the checkpoint fails.
-        """
+    def _save_checkpoint(self, name: str, metrics: Dict[str, float], epoch: int | None) -> str:
+        """Save a model checkpoint."""
+        del epoch
         run_dir = get_run_dir(self.cfg)
         ensure_dir(run_dir)
         ckpt_path = f"{run_dir}/{name}.pt"
         torch.save({"model": self.model.state_dict(), "metrics": metrics}, ckpt_path)
         return ckpt_path
+
+
+def _to_device(batch: Any, device: torch.device) -> Any:
+    """Recursively move tensors in batch to device."""
+    if isinstance(batch, dict):
+        return {k: (v.to(device) if hasattr(v, "to") else v) for k, v in batch.items()}
+    if isinstance(batch, (list, tuple)):
+        moved = []
+        for item in batch:
+            moved.append(item.to(device) if hasattr(item, "to") else item)
+        return tuple(moved)
+    return batch.to(device) if hasattr(batch, "to") else batch
+
+
+def _normalize_es_metric_key(metric: Any) -> str:
+    key = str(metric or "acc").strip().lower().replace("val/", "").replace("val_", "")
+    return key

@@ -6,7 +6,7 @@ from typing import Any, Dict, Tuple
 
 
 class Objective:
-    """Abstract objective used by trainer1."""
+    """Abstract objective used by Trainer."""
 
     def preprocess_batch(self, batch: Any, model: Any) -> Any:
         """Optionally modify batch before forward (e.g., PGD adversarial)."""

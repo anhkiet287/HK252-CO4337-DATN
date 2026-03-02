@@ -1,4 +1,4 @@
-"""Objective registry for trainer1."""
+"""Objective registry for Trainer."""
 
 from __future__ import annotations
 
@@ -25,4 +25,4 @@ def build_objective(cfg: Dict[str, Any], model: Any) -> Objective:
         return GroupDRO(cfg, model)
     if mode in {"groupdro_plus", "groupdro++"}:
         return GroupDROPlus(cfg, model)
-    raise ValueError(f"Unsupported train.mode for trainer1: {cfg['train']['mode']}")
+    raise ValueError(f"Unsupported train.mode for Trainer: {cfg['train']['mode']}")

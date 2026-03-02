@@ -66,15 +66,14 @@ python scripts/smoke_test.py --configs configs/smoke_mnist_resnet.yaml
 
 ---
 
-## Draft: Modular objective pipeline (Trainer1)
-- New draft trainer: `src/ardg/training/trainer1.py` with pluggable objectives via `train.mode ∈ {erm, pgd_at, rex, groupdro, groupdro_plus}`.
+## Modular objective pipeline (Trainer)
+- Trainer lives at `src/ardg/training/trainer.py` with pluggable objectives via `train.mode in {erm, pgd_at, rex, groupdro, groupdro_plus}`.
 - Example config: `configs/vit_2060_groupdro_draft.yaml` (shows `groupdro`, `groupdro_plus`, `rex` knobs).
 - Objective implementations live in `src/ardg/training/objectives/`; clustering helper for GroupDRO++ in `src/ardg/training/cluster_utils.py`.
-- To try it quickly, swap `Trainer` → `Trainer1` import in `scripts/train.py` (local only), then run:
+- Run:
   ```bash
   python scripts/train.py --config configs/vit_2060_groupdro_draft.yaml
   ```
-- This is additive and does not affect the existing pipeline; revert the import to return to the original trainer.
 
 ---
 
