@@ -1,0 +1,62 @@
+experiment:
+  seed: 42
+  device: cuda
+  precision: fp32
+  deterministic: true
+dataset:
+  name: cifar10
+  data_dir: /content/drive/MyDrive/ardg/data
+  val_ratio: 0.02
+  num_workers: 8
+  augmentation: randaugment
+model:
+  name: resnet50_cifar
+  num_classes: 10
+train:
+  mode: pgd_at
+  epochs: 100
+  batch_size: 64
+  log_interval: 50
+  early_stopping:
+    enabled: false
+  optimizer:
+    name: sgd
+    lr: 0.1
+    momentum: 0.9
+    weight_decay: 0.0005
+  scheduler:
+    name: cosine
+    t_max: 100
+    eta_min: 0.0
+attack:
+  train:
+    name: pgd
+    eps: 0.0313725
+    step_size: 0.007843
+    num_steps: 10
+    restarts: 1
+  val:
+    name: pgd
+    eps: 0.0313725
+    step_size: 0.007843
+    num_steps: 20
+    restarts: 5
+  eval:
+    enabled: true
+    pgd20:
+      eps: 0.0313725
+      step_size: 0.007843
+      num_steps: 20
+      restarts: 5
+  autoattack:
+    enabled: true
+    eps: 0.0313725
+    norm: Linf
+    version: standard
+logging:
+  wandb:
+    enabled: true
+    project: ardg
+    entity: ''
+  run_name: resnet50_colab_pgd_at
+  output_dir: /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs
