@@ -2,26 +2,48 @@
 
 from typing import Any, Dict, TYPE_CHECKING
 
+from ardg.attacks.cw import build_cw_attack
+from ardg.attacks.deepfool import build_deepfool_attack
+from ardg.attacks.fab import build_fab_attack
+from ardg.attacks.fgsm import build_fgsm_attack
 from ardg.attacks.pgd import build_pgd_attack
+from ardg.attacks.square import build_square_attack
 
 if TYPE_CHECKING:
     from torch import nn
 
 
+def _build_attack_from_cfg(atk_cfg: Dict[str, Any], model: "nn.Module") -> Any:
+    name = str(atk_cfg.get("name", "pgd")).lower()
+    if name in {"pgd", "pgd_linf"}:
+        return build_pgd_attack(atk_cfg, model)
+    if name == "fgsm":
+        return build_fgsm_attack(atk_cfg, model)
+    if name in {"cw", "carlini-wagner", "carlini_wagner"}:
+        return build_cw_attack(atk_cfg, model)
+    if name == "deepfool":
+        return build_deepfool_attack(atk_cfg, model)
+    if name == "square":
+        return build_square_attack(atk_cfg, model)
+    if name == "fab":
+        return build_fab_attack(atk_cfg, model)
+    raise ValueError(f"Unsupported attack name: {name}")
+
+
 def build_train_attack(cfg: Dict[str, Any], model: "nn.Module") -> Any:
-    """Build the training-time adversarial attack (PGD Linf)."""
+    """Build the training-time adversarial attack."""
     model.eval()
     atk_cfg = dict(cfg["attack"]["train"])
     atk_cfg["dataset_name"] = cfg["dataset"]["name"]
-    return build_pgd_attack(atk_cfg, model)
+    return _build_attack_from_cfg(atk_cfg, model)
 
 
 def build_val_attack(cfg: Dict[str, Any], model: "nn.Module") -> Any:
-    """Build the validation-time adversarial attack (PGD Linf)."""
+    """Build the validation-time adversarial attack."""
     model.eval()
     atk_cfg = dict(cfg["attack"]["val"])
     atk_cfg["dataset_name"] = cfg["dataset"]["name"]
-    return build_pgd_attack(atk_cfg, model)
+    return _build_attack_from_cfg(atk_cfg, model)
 
 
 def build_eval_attacks(cfg: Dict[str, Any], model: "nn.Module") -> Dict[str, Any]:
@@ -32,7 +54,7 @@ def build_eval_attacks(cfg: Dict[str, Any], model: "nn.Module") -> Dict[str, Any
 
     Notes:
         Threat model: Linf.
-        Normalization: Attack expects inputs already normalized with CIFAR-10 mean/std.
+        Normalization: Attack expects inputs already normalized with dataset-specific mean/std.
     """
     model.eval()
     eval_cfg = cfg["attack"]["eval"]

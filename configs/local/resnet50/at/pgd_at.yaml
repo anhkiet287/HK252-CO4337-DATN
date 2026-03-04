@@ -3,19 +3,22 @@ experiment:
   device: cuda
   precision: fp32
   deterministic: true
-  platform: local
 dataset:
   name: cifar10
   data_dir: data
   val_ratio: 0.02
-  num_workers: 2
+  num_workers: 8
+  augmentation: randaugment
 model:
-  name: resnet18_cifar
+  name: resnet50_cifar
   num_classes: 10
 train:
   mode: pgd_at
-  epochs: 1
-  batch_size: 64
+  epochs: 100
+  batch_size: 128
+  log_interval: 50
+  early_stopping:
+    enabled: false
   optimizer:
     name: sgd
     lr: 0.1
@@ -23,7 +26,7 @@ train:
     weight_decay: 0.0005
   scheduler:
     name: cosine
-    t_max: 1
+    t_max: 100
     eta_min: 0.0
 attack:
   train:
@@ -31,34 +34,29 @@ attack:
     eps: 0.0313725
     step_size: 0.007843
     num_steps: 10
+    restarts: 1
   val:
     name: pgd
     eps: 0.0313725
     step_size: 0.007843
-    num_steps: 10
+    num_steps: 20
+    restarts: 5
   eval:
-    enabled: false
-    name: attack_suite
-    eps: 0.0313725
-    step_size: 0.007843
-    num_steps: 10
+    enabled: true
+    pgd20:
+      eps: 0.0313725
+      step_size: 0.007843
+      num_steps: 20
+      restarts: 5
   autoattack:
-    enabled: false
+    enabled: true
     eps: 0.0313725
+    norm: Linf
+    version: standard
 logging:
   wandb:
     enabled: true
     project: ardg
     entity: ''
-  run_name: visualize_pgd_steps
-  output_dir: /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs
-visualize:
-  layer: layer4
-  max_batches: 1
-  max_samples: 1
-  include_clean: true
-  output_dir: outputs/visualize
-  checkpoint: ''
-  log_wandb: true
-  max_log_images: 1
-  projection: pca
+  run_name: resnet50_local_pgd_at
+  output_dir: outputs

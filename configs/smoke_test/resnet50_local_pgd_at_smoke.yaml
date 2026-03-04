@@ -1,21 +1,33 @@
 experiment:
+  platform: local
   seed: 42
   device: cuda
   precision: fp32
   deterministic: true
-  platform: local
+
 dataset:
   name: cifar10
   data_dir: data
   val_ratio: 0.02
   num_workers: 4
+  augmentation: randaugment
+  max_train_samples: 512
+  max_val_samples: 128
+  max_test_samples: 128
+
 model:
-  name: resnet18_cifar
+  name: resnet50_cifar
   num_classes: 10
+
 train:
   mode: pgd_at
-  epochs: 100
-  batch_size: 128
+  epochs: 2
+  batch_size: 64
+  max_batches: 8
+  max_val_batches: 4
+  log_interval: 1
+  early_stopping:
+    enabled: false
   optimizer:
     name: sgd
     lr: 0.1
@@ -23,37 +35,40 @@ train:
     weight_decay: 0.0005
   scheduler:
     name: cosine
-    t_max: 100
+    t_max: 2
     eta_min: 0.0
+
 attack:
   train:
     name: pgd
     eps: 0.0313725
     step_size: 0.007843
-    num_steps: 7
+    num_steps: 2
+    restarts: 1
+    random_start: true
   val:
     name: pgd
     eps: 0.0313725
     step_size: 0.007843
-    num_steps: 20
+    num_steps: 5
+    restarts: 1
+    random_start: true
   eval:
-    enabled: true
-    name: attack_suite
-    eps: 0.0313725
-    step_size: 0.007843
-    num_steps: 20
+    enabled: false
     pgd20:
       eps: 0.0313725
       step_size: 0.007843
       num_steps: 20
       restarts: 5
   autoattack:
-    enabled: true
+    enabled: false
     eps: 0.0313725
+    norm: Linf
+    version: standard
+
 logging:
   wandb:
-    enabled: true
+    enabled: false
     project: ardg
-    entity: ''
-  run_name: cifar10_pgd_at
-  output_dir: /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs
+    entity: ""
+  run_name: smoke_resnet50_local_pgd_at

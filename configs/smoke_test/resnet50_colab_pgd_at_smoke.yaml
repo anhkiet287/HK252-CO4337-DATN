@@ -1,38 +1,41 @@
 experiment:
-  seed: 123
-  device: cpu
+  platform: colab
+  seed: 42
+  device: cuda
   precision: fp32
   deterministic: true
-  platform: local
 
 dataset:
   name: cifar10
-  data_dir: data
-  val_ratio: 0.1
-  num_workers: 0
-  max_train_samples: 64
-  max_val_samples: 32
-  max_test_samples: 32
+  data_dir: /content/drive/MyDrive/ardg/data
+  val_ratio: 0.02
+  num_workers: 4
+  augmentation: randaugment
+  max_train_samples: 512
+  max_val_samples: 128
+  max_test_samples: 128
 
 model:
-  name: resnet18_cifar
+  name: resnet50_cifar
   num_classes: 10
 
 train:
   mode: pgd_at
-  epochs: 1
-  batch_size: 16
-  max_batches: 4
-  max_val_batches: 2
+  epochs: 2
+  batch_size: 64
+  max_batches: 8
+  max_val_batches: 4
   log_interval: 1
+  early_stopping:
+    enabled: false
   optimizer:
     name: sgd
-    lr: 0.01
+    lr: 0.1
     momentum: 0.9
     weight_decay: 0.0005
   scheduler:
     name: cosine
-    t_max: 1
+    t_max: 2
     eta_min: 0.0
 
 attack:
@@ -41,11 +44,15 @@ attack:
     eps: 0.0313725
     step_size: 0.007843
     num_steps: 2
+    restarts: 1
+    random_start: true
   val:
     name: pgd
     eps: 0.0313725
     step_size: 0.007843
-    num_steps: 2
+    num_steps: 5
+    restarts: 1
+    random_start: true
   eval:
     enabled: false
     pgd20:
@@ -56,11 +63,12 @@ attack:
   autoattack:
     enabled: false
     eps: 0.0313725
+    norm: Linf
+    version: standard
 
 logging:
   wandb:
     enabled: false
     project: ardg
     entity: ""
-  run_name: smoke_quick_resnet18_pgd_at
-  output_dir: outputs/smoke_local
+  run_name: smoke_resnet50_colab_pgd_at

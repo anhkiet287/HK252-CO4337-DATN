@@ -115,6 +115,7 @@ def main() -> None:
                 loader,
                 aa_eps,
                 device,
+                dataset_name=cfg["dataset"]["name"],
                 norm=aa_norm,
                 version=aa_version,
                 max_batches=aa_max_batches,

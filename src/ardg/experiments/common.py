@@ -11,7 +11,7 @@ from ardg.data.datasets import get_dataloaders
 from ardg.evaluation.evaluator import evaluate_clean
 from ardg.models.factory import build_model
 from ardg.utils.logging import init_wandb, log_metrics, setup_logging
-from ardg.utils.paths import ensure_dir, get_run_dir
+from ardg.utils.paths import default_output_dir, ensure_dir, get_run_dir
 from ardg.utils.seed import set_seed
 
 
@@ -52,6 +52,9 @@ def setup_run(
     cfg = load_config(cfg_path)
     platform = resolve_platform(cfg.get("experiment", {}).get("platform"))
     cfg.setdefault("experiment", {})["platform"] = platform
+    logging_cfg = cfg.setdefault("logging", {})
+    if str(logging_cfg.get("output_dir", "")).strip() == "":
+        logging_cfg["output_dir"] = default_output_dir(cfg)
     deterministic = cfg.get("experiment", {}).get("deterministic", True)
     set_seed(cfg["experiment"]["seed"], deterministic=deterministic)
 

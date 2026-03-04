@@ -6,6 +6,9 @@ import time
 from typing import Any, Dict
 
 import torch
+from torch import nn
+
+from ardg.data.transforms import get_dataset_stats
 
 
 def _require_autoattack() -> Any:
@@ -21,12 +24,27 @@ def _require_autoattack() -> Any:
     return AutoAttack
 
 
+class _PixelToNormalizedAdapter(nn.Module):
+    """Wrap a normalized-input model to accept [0,1] pixel inputs."""
+
+    def __init__(self, model: Any, mean: tuple[float, float, float], std: tuple[float, float, float]) -> None:
+        super().__init__()
+        self.model = model
+        self.register_buffer("mean", torch.tensor(mean, dtype=torch.float32).view(1, 3, 1, 1))
+        self.register_buffer("std", torch.tensor(std, dtype=torch.float32).view(1, 3, 1, 1))
+
+    def forward(self, x_pixel: torch.Tensor) -> torch.Tensor:
+        x_norm = (x_pixel - self.mean) / self.std
+        return self.model(x_norm)
+
+
 def run_autoattack(
     model: Any,
     loader: Any,
     eps: float,
     device: str,
     *,
+    dataset_name: str = "cifar10",
     norm: str = "Linf",
     version: str = "standard",
     max_batches: int | None = None,
@@ -34,10 +52,11 @@ def run_autoattack(
     """Run AutoAttack for evaluation.
 
     Args:
-        model: Classification model.
-        loader: Dataloader yielding (images, labels).
-        eps: Attack epsilon value.
+        model: Classification model that expects normalized inputs.
+        loader: Dataloader yielding normalized images and labels.
+        eps: Pixel-space attack epsilon value (e.g., 8/255 for CIFAR-10).
         device: Device string (e.g., "cuda", "cpu").
+        dataset_name: Dataset name used to resolve mean/std normalization stats.
         norm: Threat norm. Default is Linf.
         version: AutoAttack version. Default is standard.
         max_batches: Optional cap for quick runs.
@@ -50,9 +69,14 @@ def run_autoattack(
     device_t = torch.device(device)
     eps_f = float(eps)
     bs_default = int(getattr(loader, "batch_size", 128) or 128)
+    mean, std = get_dataset_stats(dataset_name)
+    adapted_model = _PixelToNormalizedAdapter(model, mean, std).to(device_t)
+    adapted_model.eval()
+    mean_t = adapted_model.mean
+    std_t = adapted_model.std
 
     adversary = AutoAttack(
-        model,
+        adapted_model,
         norm=str(norm),
         eps=eps_f,
         version=str(version),
@@ -66,9 +90,11 @@ def run_autoattack(
         images = images.to(device_t)
         labels = labels.to(device_t)
         bs = min(bs_default, int(images.size(0)))
-        x_adv = adversary.run_standard_evaluation(images, labels, bs=bs)
+        images_pixel = torch.clamp(images * std_t + mean_t, 0.0, 1.0)
+        x_adv = adversary.run_standard_evaluation(images_pixel, labels, bs=bs)
+        x_adv = x_adv.to(device_t)
         with torch.no_grad():
-            logits = model(x_adv)
+            logits = adapted_model(x_adv)
             total_correct += (logits.argmax(dim=1) == labels).sum().item()
             total_seen += int(images.size(0))
         if max_batches and batch_idx >= int(max_batches):
@@ -79,6 +105,7 @@ def run_autoattack(
         "acc": total_correct / max(total_seen, 1),
         "n_samples": total_seen,
         "eps": eps_f,
+        "eps_space": "pixel",
         "aa_runtime_sec": runtime,
         "aa_n_samples": total_seen,
         "aa_norm": str(norm),

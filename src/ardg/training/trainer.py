@@ -28,12 +28,19 @@ class Trainer:
     ) -> None:
         """Initialize the trainer."""
         self.cfg = cfg
-        self.model = model
-        self.train_loader = train_loader
+        self.model = model # build model 
+
+        # get train and val loader
+        self.train_loader = train_loader 
         self.val_loader = val_loader
+
+        # load model to device
         self.device = torch.device(device or "cpu")
         self.model.to(self.device)
-        self.logger = logger or logging.getLogger(__name__)
+        
+        self.logger = logger or logging.getLogger(__name__) # init logging
+
+        # smoke test if need 
         self.max_train_batches = cfg["train"].get("max_batches")
         self.max_val_batches = cfg["train"].get("max_val_batches")
         self.log_interval = cfg["train"].get("log_interval", 50)
@@ -42,6 +49,7 @@ class Trainer:
         wandb_cfg = cfg.get("logging", {}).get("wandb", {})
         self.wandb_run_id = str(wandb_cfg.get("run_id", "")).strip() or None
 
+        # optimizer
         opt_cfg = cfg["train"]["optimizer"]
         self.optimizer = torch.optim.SGD(
             model.parameters(),
@@ -49,6 +57,8 @@ class Trainer:
             momentum=opt_cfg.get("momentum", 0.9),
             weight_decay=opt_cfg.get("weight_decay", 0.0),
         )
+
+        # scheduler
         self.scheduler = None
         sched_cfg = cfg["train"].get("scheduler", {})
         if sched_cfg.get("name") == "multistep":
@@ -66,11 +76,13 @@ class Trainer:
                 eta_min=eta_min,
             )
 
+        # build loss function 
         self.objective = build_objective(cfg, model)
         self.best_metric = float("-inf")
         self.best_epoch = 0
         self.best_ckpt_path: Optional[str] = None
 
+        # early stopping
         es_cfg = cfg["train"].get("early_stopping", {})
         self.es_enabled = bool(es_cfg.get("enabled", False))
         self.es_patience = int(es_cfg.get("patience", 10))
@@ -88,6 +100,8 @@ class Trainer:
         """Run the full training loop."""
         epochs = self.cfg["train"]["epochs"]
         last_ckpt_path = ""
+
+        # resume previous training if available
         if self.start_epoch > epochs:
             self.logger.info(
                 "Resume epoch (%s) is beyond configured epochs (%s). Skipping training.",
@@ -101,25 +115,27 @@ class Trainer:
                 best_path = last_path
             return {"last": last_path, "best": best_path}
 
+        # training loop
         for epoch in range(self.start_epoch, epochs + 1):
             self.logger.info("Starting epoch %s", epoch)
             start = time.perf_counter()
 
-            train_metrics = self.train_one_epoch(epoch)
-            train_metrics["time_sec"] = time.perf_counter() - start
+            train_metrics = self.train_one_epoch(epoch) # loss, acc, lr
+            train_metrics["time_sec"] = time.perf_counter() - start # compute time
             train_metrics["device"] = str(self.device)
             log_metrics(self.logger, train_metrics, self.global_step, "train")
 
-            val_metrics = self.validate(epoch)
+            val_metrics = self.validate(epoch) # loss, acc
             val_metrics["device"] = str(self.device)
             log_metrics(self.logger, val_metrics, self.global_step, "val")
-            val_acc = float(val_metrics.get("acc", 0.0))
+            val_acc = float(val_metrics.get("acc", 0.0)) # cache val acc for select best model 
 
             try:
                 self.objective.on_epoch_end(epoch, {"train": self.train_loader, "val": self.val_loader})
             except AttributeError:
                 pass
-
+            
+            # select best model 
             if val_acc >= self.best_metric:
                 self.best_metric = val_acc
                 self.best_epoch = epoch
@@ -143,6 +159,7 @@ class Trainer:
                 epoch,
             )
 
+            # early stopping
             should_stop = self._update_early_stopping(epoch, val_metrics)
             if self.scheduler is not None:
                 self.scheduler.step()
