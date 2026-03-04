@@ -1,115 +1,170 @@
 # ARDG (Adversarial Robust Domain Generalization)
 
-Research-oriented robust training/evaluation for multiple small image datasets using **PGD Adversarial Training (PGD-AT)** and a standardized **attack suite**.
+Training and evaluation pipeline for CIFAR-style robustness/domain-generalization experiments.
 
-- Primary attack backend: **TorchAttacks**
-- **AutoAttack** is used for evaluation only (optional)
+Current implemented training modes:
+- `erm`
+- `pgd_at`
+- `multi_attack_erm`
+- `rex`
+- `groupdro`
+- `groupdro_plus`
 
----
+Attack backend:
+- Training/eval attacks: `torchattacks`
+- Optional eval-only AutoAttack: `autoattack`
 
-## Quick start
+## 1) Setup
 
-Run from the repo root.
+From repo root:
 
-### 1) Install
-
-**Recommended (editable install for research/dev):**
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 ```
 
-With Weights & Biases logging:
+Optional extras:
+
 ```bash
 pip install -e ".[wandb]"
-```
-
-Dev tools (tests + lint, optional):
-```bash
+pip install -e ".[autoattack]"
 pip install -e ".[dev]"
 ```
 
-We recommend `pip install -e .` so that local code changes are immediately reflected without reinstalling.
+Note: scripts default to `configs/default.yaml` if `--config` is omitted, but this repo does not ship that file. Always pass `--config`.
 
----
+## 2) Configs By Mode
 
-### 2) Train (creates splits on the fly)
+Local configs:
+- `erm`: `configs/local/resnet18/erm/erm.yaml`, `configs/local/vit_b16/erm/erm.yaml`
+- `pgd_at`: `configs/local/resnet18/at/pgd_at.yaml`, `configs/local/resnet50/at/pgd_at.yaml`, `configs/local/vit_b16/at/pgd_at.yaml`
+- `multi_attack_erm`: `configs/local/resnet50/at/multi_attack_erm.yaml`
+- `rex`: `configs/local/resnet18/at/rex.yaml`, `configs/local/vit_b16/at/rex.yaml`
+- `groupdro`: `configs/local/resnet18/at/groupdro.yaml`, `configs/local/vit_b16/at/groupdro.yaml`
+- `groupdro_plus`: `configs/local/resnet18/at/groupdro_plus.yaml`, `configs/local/vit_b16/at/groupdro_plus.yaml`
 
-```bash
-python scripts/train.py --config configs/default.yaml
-```
+Colab configs:
+- `erm`: `configs/colab/resnet18/erm/erm.yaml`, `configs/colab/resnet50/erm/erm.yaml`, `configs/colab/vit_b16/erm/erm.yaml`
+- `pgd_at`: `configs/colab/resnet18/at/pgd_at.yaml`, `configs/colab/resnet50/at/pgd_at.yaml`, `configs/colab/vit_b16/at/pgd_at.yaml`
+- `multi_attack_erm`: `configs/colab/resnet50/at/multi_attack_erm.yaml`, `configs/colab/resnet50/at/multi_attack_erm_5ep.yaml`, `configs/colab/resnet50/at/multi_attack_erm_10ep.yaml`
+- `rex`: `configs/colab/resnet18/at/rex.yaml`, `configs/colab/vit_b16/at/rex.yaml`
+- `groupdro`: `configs/colab/resnet18/at/groupdro.yaml`, `configs/colab/vit_b16/at/groupdro.yaml`
+- `groupdro_plus`: `configs/colab/resnet18/at/groupdro_plus.yaml`, `configs/colab/vit_b16/at/groupdro_plus.yaml`
 
-This downloads the dataset (if missing), creates a stratified split from the config seed/val_ratio, and logs metrics to console/W&B.
+## 3) Train
 
----
-
-### 3) Evaluate (val + test)
-
-```bash
-python scripts/evaluate.py --config configs/default.yaml --checkpoint <path_to_checkpoint>
-```
-
-Runs clean + configured attacks (and AutoAttack if enabled) on both val/test splits and logs to console/W&B.
-
----
-
-## Smoke tests (train 2 epochs + clean eval)
-
-Run all smoke configs (CIFAR-10, MNIST, Fashion-MNIST, Color-MNIST):
-```bash
-python scripts/smoke_test.py
-```
-
-Run a single smoke config:
-```bash
-python scripts/smoke_test.py --configs configs/smoke_mnist_resnet.yaml
-```
-
----
-
-## Modular objective pipeline (Trainer)
-- Trainer lives at `src/ardg/training/trainer.py` with pluggable objectives via `train.mode in {erm, pgd_at, rex, groupdro, groupdro_plus}`.
-- Example config: `configs/vit_2060_groupdro_draft.yaml` (shows `groupdro`, `groupdro_plus`, `rex` knobs).
-- Objective implementations live in `src/ardg/training/objectives/`; clustering helper for GroupDRO++ in `src/ardg/training/cluster_utils.py`.
-- Run:
-  ```bash
-  python scripts/train.py --config configs/vit_2060_groupdro_draft.yaml
-  ```
-
----
-
-## Repo layout (essentials)
-- `configs/default.yaml` -- single source of truth (dataset/model/train/attacks/logging)
-- `configs/smoke_*.yaml` -- small smoke-test configs for quick checks
-- `scripts/` -- entry points (prepare_data.py, train.py, evaluate.py, smoke_test.py)
-- `src/ardg/` -- library code (models, attacks, training, evaluation, utils)
-- `data/` -- dataset cache + processed split artifacts
-- `outputs/` -- runtime artifacts (not committed)
-
----
-
-## Config notes
-
-Default config targets:
-- CIFAR-10
-- stratified validation split: 2%
-- seed: 42
-- training: PGD-AT (Linf)
-- evaluation: clean + attack suite (+ optional AutoAttack)
-
-All hyperparameters must be controlled via `configs/default.yaml` (no hardcoded experiment settings inside code).
-
----
-
-## Testing
+Generic:
 
 ```bash
-pytest -q
+PYTHONPATH=src python3 scripts/train.py --config <CONFIG_PATH>
 ```
 
----
+Resume latest checkpoint in run dir:
 
-## Minimal dev rules (for clean reviews)
-- `scripts/` = entry points only (no heavy logic)
-- Core logic lives in `src/ardg/`
-- Keep functions small and composable (avoid "god functions")
-- Add/modify experiments via config, not by editing training code
+```bash
+PYTHONPATH=src python3 scripts/train.py --config <CONFIG_PATH> --resume
+```
+
+Resume specific checkpoint:
+
+```bash
+PYTHONPATH=src python3 scripts/train.py --config <CONFIG_PATH> --checkpoint <CKPT_PATH>
+```
+
+Examples:
+
+```bash
+# ERM
+PYTHONPATH=src python3 scripts/train.py --config configs/local/resnet18/erm/erm.yaml
+
+# PGD-AT
+PYTHONPATH=src python3 scripts/train.py --config configs/local/resnet50/at/pgd_at.yaml
+
+# Multi-attack ERM
+PYTHONPATH=src python3 scripts/train.py --config configs/local/resnet50/at/multi_attack_erm.yaml
+
+# REx
+PYTHONPATH=src python3 scripts/train.py --config configs/local/resnet18/at/rex.yaml
+
+# GroupDRO
+PYTHONPATH=src python3 scripts/train.py --config configs/local/resnet18/at/groupdro.yaml
+
+# GroupDRO+
+PYTHONPATH=src python3 scripts/train.py --config configs/local/resnet18/at/groupdro_plus.yaml
+```
+
+## 4) Evaluate
+
+Generic:
+
+```bash
+PYTHONPATH=src python3 scripts/evaluate.py --config <CONFIG_PATH> --checkpoint <CKPT_PATH> --splits val,test
+```
+
+If `--checkpoint` is omitted, evaluator tries `best.pt` then `last.pt` in the run directory for that config.
+
+Evaluation behavior:
+- always logs clean accuracy
+- runs attack suite from `attack.eval` (currently requires `pgd20`)
+- runs AutoAttack only if `attack.autoattack.enabled: true`
+
+## 5) Preflight Checks
+
+Use preflight before training to verify normalization/attack IO consistency.
+
+```bash
+PYTHONPATH=src python3 scripts/preflight_check.py --config <CONFIG_PATH> --io_mode normalized
+PYTHONPATH=src python3 scripts/preflight_check.py --config <CONFIG_PATH> --io_mode pixel
+```
+
+## 6) Attack Visualization (Clean / Adv / Perturbation)
+
+```bash
+PYTHONPATH=src python3 scripts/attack_visual_check.py \
+  --config <CONFIG_PATH> \
+  --checkpoint <CKPT_PATH> \
+  --split test \
+  --attack-source eval_pgd20 \
+  --num-samples 8
+```
+
+Artifacts are saved to `<run_dir>/attack_visual_check` unless `--output-dir` is set.
+
+## 7) Smoke Tests
+
+Run existing smoke configs explicitly:
+
+```bash
+PYTHONPATH=src python3 scripts/smoke_test.py --configs \
+  configs/smoke_test/resnet50_local_pgd_at_smoke.yaml \
+  configs/smoke_test/resnet50_local_multi_attack_erm_smoke.yaml
+```
+
+## 8) Outputs And Logging
+
+Per-run directory:
+- `<output_dir>/<run_name>/best.pt`
+- `<output_dir>/<run_name>/last.pt`
+
+Default output root when `logging.output_dir` is omitted:
+- local: `outputs`
+- colab: `/content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs`
+
+WandB:
+- controlled by `logging.wandb.enabled`
+- for resume support, run id is persisted in `<run_dir>/wandb_run_id.txt`
+
+## 9) Core Entry Points
+
+- Train: `scripts/train.py`
+- Evaluate: `scripts/evaluate.py`
+- Smoke: `scripts/smoke_test.py`
+- Preflight: `scripts/preflight_check.py`
+- Attack visualization: `scripts/attack_visual_check.py`
+
+Core modules:
+- Training loop: `src/ardg/training/trainer.py`
+- Objectives registry/modes: `src/ardg/training/objectives/__init__.py`
+- Evaluator class: `src/ardg/evaluation/evaluator.py`
+- Attack builders: `src/ardg/attacks/attack_suite.py`

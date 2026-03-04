@@ -9,7 +9,7 @@ import torch
 from ardg.attacks.attack_suite import build_eval_attacks
 from ardg.attacks.autoattack import run_autoattack
 from ardg.config import DEFAULT_CONFIG_PATH
-from ardg.evaluation.evaluator import evaluate_clean, evaluate_suite
+from ardg.evaluation.evaluator import Evaluator
 from ardg.experiments.common import build_loaders, load_model_from_checkpoint, setup_run
 from ardg.utils.logging import log_metrics
 from ardg.utils.paths import get_run_dir
@@ -98,14 +98,15 @@ def main() -> None:
             continue
 
         loader = split_loaders[split_name]
-        clean = evaluate_clean(model, loader, device)
+        evaluator = Evaluator(model, loader, device=device, attack_suite=attacks)
+        clean = evaluator.evaluate_clean()
         acc_clean = float(clean.get("acc", 0.0))
         n_samples = int(clean.get("n_samples", 0))
         test_n_samples = n_samples if split_name == "test" else test_n_samples
 
         acc_pgd20 = None
         if attacks:
-            pgd20 = evaluate_suite(model, loader, {"pgd20": attacks["pgd20"]}, device)["pgd20"]
+            pgd20 = evaluator.evaluate_suite({"pgd20": attacks["pgd20"]})["pgd20"]
             acc_pgd20 = float(pgd20.get("acc", 0.0))
 
         acc_aa = None
