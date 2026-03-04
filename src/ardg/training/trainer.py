@@ -129,6 +129,13 @@ class Trainer:
             val_metrics["device"] = str(self.device)
             log_metrics(self.logger, val_metrics, self.global_step, "val")
             val_acc = float(val_metrics.get("acc", 0.0)) # cache val acc for select best model 
+            train_mode = str(self.cfg.get("train", {}).get("mode", "")).lower()
+            ckpt_metric_name = "acc"
+            ckpt_metric = val_acc
+            if train_mode in {"multi_attack_erm", "multi-attack-erm", "multi_attack"}:
+                if "pgd20_probe_acc" in val_metrics:
+                    ckpt_metric_name = "pgd20_probe_acc"
+                    ckpt_metric = float(val_metrics["pgd20_probe_acc"])
 
             try:
                 self.objective.on_epoch_end(epoch, {"train": self.train_loader, "val": self.val_loader})
@@ -136,14 +143,16 @@ class Trainer:
                 pass
             
             # select best model 
-            if val_acc >= self.best_metric:
-                self.best_metric = val_acc
+            if ckpt_metric >= self.best_metric:
+                self.best_metric = ckpt_metric
                 self.best_epoch = epoch
                 self.best_ckpt_path = self._save_checkpoint(
                     "best",
                     {
                         "epoch": epoch,
                         "val_acc": val_acc,
+                        "selection_metric": ckpt_metric,
+                        "selection_metric_name": ckpt_metric_name,
                         "val_loss": float(val_metrics.get("loss", 0.0)),
                     },
                     epoch,
@@ -154,6 +163,8 @@ class Trainer:
                 {
                     "epoch": epoch,
                     "val_acc": val_acc,
+                    "selection_metric": ckpt_metric,
+                    "selection_metric_name": ckpt_metric_name,
                     "val_loss": float(val_metrics.get("loss", 0.0)),
                 },
                 epoch,
@@ -280,7 +291,7 @@ class Trainer:
             return current < (self.es_best_metric - self.es_min_delta)
         return current > (self.es_best_metric + self.es_min_delta)
 
-    def train_one_epoch(self, epoch: int) -> Dict[str, float]:
+    def train_one_epoch(self, epoch: int) -> Dict[str, Any]:
         """Run one training epoch."""
         del epoch
         self.model.train()
@@ -288,6 +299,8 @@ class Trainer:
         total_loss = 0.0
         total_correct = 0
         total_seen = 0
+        domain_counts: Dict[str, float] = {}
+        last_domain_name: str | None = None
 
         for step_idx, batch in enumerate(self.train_loader, start=1):
             self.global_step += 1
@@ -295,6 +308,12 @@ class Trainer:
             total_loss += metrics["loss"] * metrics["batch_size"]
             total_correct += metrics["correct"]
             total_seen += metrics["batch_size"]
+            if "domain_name" in metrics:
+                last_domain_name = str(metrics["domain_name"])
+            batch_domain_counts = metrics.get("domain_batch_counts")
+            if isinstance(batch_domain_counts, dict):
+                for name, count in batch_domain_counts.items():
+                    domain_counts[str(name)] = domain_counts.get(str(name), 0.0) + float(count)
 
             if self.log_interval and step_idx % self.log_interval == 0:
                 batch_metrics = {
@@ -302,6 +321,8 @@ class Trainer:
                     "acc": metrics["acc"],
                     "lr": metrics["lr"],
                 }
+                if "domain_name" in metrics:
+                    batch_metrics["domain_name"] = metrics["domain_name"]
                 log_metrics(self.logger, batch_metrics, self.global_step, "train_batch")
             if self.max_train_batches and step_idx >= self.max_train_batches:
                 break
@@ -309,9 +330,13 @@ class Trainer:
         avg_loss = total_loss / max(total_seen, 1)
         acc = total_correct / max(total_seen, 1)
         current_lr = self.optimizer.param_groups[0]["lr"]
-        return {"loss": avg_loss, "acc": acc, "lr": current_lr}
+        epoch_metrics: Dict[str, Any] = {"loss": avg_loss, "acc": acc, "lr": current_lr}
+        if last_domain_name is not None:
+            epoch_metrics["domain_name"] = last_domain_name
+        for name, count in domain_counts.items():
+            epoch_metrics[f"domain_count/{name}"] = count
+        return epoch_metrics
 
-    @torch.no_grad()
     def validate(self, epoch: int) -> Dict[str, float]:
         """Run validation for one epoch."""
         del epoch
@@ -319,23 +344,34 @@ class Trainer:
         total_loss = 0.0
         total_correct = 0
         total_seen = 0
-        for step_idx, batch in enumerate(self.val_loader, start=1):
-            if isinstance(batch, dict):
-                images, labels = batch["x"], batch["y"]
-            else:
-                images, labels = batch
-            images = images.to(self.device)
-            labels = labels.to(self.device)
-            logits = self.model(images)
-            loss = compute_loss(logits, labels)
-            total_loss += loss.item() * images.size(0)
-            total_correct += (logits.argmax(dim=1) == labels).sum().item()
-            total_seen += images.size(0)
-            if self.max_val_batches and step_idx >= self.max_val_batches:
-                break
-        return {"loss": total_loss / max(total_seen, 1), "acc": total_correct / max(total_seen, 1)}
+        with torch.no_grad():
+            for step_idx, batch in enumerate(self.val_loader, start=1):
+                if isinstance(batch, dict):
+                    images, labels = batch["x"], batch["y"]
+                else:
+                    images, labels = batch
+                images = images.to(self.device)
+                labels = labels.to(self.device)
+                logits = self.model(images)
+                loss = compute_loss(logits, labels)
+                total_loss += loss.item() * images.size(0)
+                total_correct += (logits.argmax(dim=1) == labels).sum().item()
+                total_seen += images.size(0)
+                if self.max_val_batches and step_idx >= self.max_val_batches:
+                    break
+        metrics: Dict[str, float] = {
+            "loss": total_loss / max(total_seen, 1),
+            "acc": total_correct / max(total_seen, 1),
+        }
+        try:
+            extra = self.objective.validate(self.model, self.val_loader)
+        except AttributeError:
+            extra = {}
+        if isinstance(extra, dict):
+            metrics.update(extra)
+        return metrics
 
-    def _train_step(self, batch: Any) -> Dict[str, float]:
+    def _train_step(self, batch: Any) -> Dict[str, Any]:
         """Run a single training step."""
         batch = _to_device(batch, self.device)
         batch = self.objective.preprocess_batch(batch, self.model)
@@ -348,7 +384,7 @@ class Trainer:
         metrics["lr"] = self.optimizer.param_groups[0]["lr"]
         return metrics
 
-    def _save_checkpoint(self, name: str, metrics: Dict[str, float], epoch: int | None) -> str:
+    def _save_checkpoint(self, name: str, metrics: Dict[str, Any], epoch: int | None) -> str:
         """Save a model checkpoint."""
         epoch_value = int(epoch if epoch is not None else metrics.get("epoch", 0))
         run_dir = get_run_dir(self.cfg)

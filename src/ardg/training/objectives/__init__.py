@@ -10,6 +10,7 @@ from ardg.training.objectives.pgd_at import PGDAT
 from ardg.training.objectives.rex import REx
 from ardg.training.objectives.groupdro import GroupDRO
 from ardg.training.objectives.groupdro_plus import GroupDROPlus
+from ardg.training.objectives.multi_attack_erm import MultiAttackERM
 
 
 def build_objective(cfg: Dict[str, Any], model: Any) -> Objective:
@@ -19,6 +20,8 @@ def build_objective(cfg: Dict[str, Any], model: Any) -> Objective:
         return ERM(cfg)
     if mode == "pgd_at":
         return PGDAT(cfg, model)
+    if mode in {"multi_attack_erm", "multi-attack-erm", "multi_attack"}:
+        return MultiAttackERM(cfg, model)
     if mode == "rex":
         return REx(cfg, model)
     if mode in {"groupdro", "group_dro"}:

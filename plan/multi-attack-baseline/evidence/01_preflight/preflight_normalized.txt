@@ -1,0 +1,7 @@
+[INFO] io_mode=normalized input_min=-1.989474 input_max=2.126489
+[INFO] pixel_view_min=0.000000 pixel_view_max=1.000000
+[INFO] normalized_roundtrip_max_abs_err=0.00000024
+[INFO] clamp_check=PASS
+[INFO] forward_check=PASS logits_shape=(16, 10)
+[INFO] pgd_small_steps=5 delta_linf_max=0.031373 eps=0.031373 eps_ok=True
+[PASS] preflight checks passed

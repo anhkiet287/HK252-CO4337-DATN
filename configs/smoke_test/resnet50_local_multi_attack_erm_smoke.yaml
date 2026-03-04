@@ -1,0 +1,107 @@
+experiment:
+  platform: local
+  seed: 42
+  device: cuda
+  precision: fp32
+  deterministic: true
+
+dataset:
+  name: cifar10
+  data_dir: data
+  val_ratio: 0.02
+  num_workers: 4
+  augmentation: randaugment
+  max_train_samples: 512
+  max_val_samples: 128
+  max_test_samples: 128
+
+model:
+  name: resnet50_cifar
+  num_classes: 10
+
+train:
+  mode: multi_attack_erm
+  epochs: 2
+  batch_size: 64
+  max_batches: 8
+  max_val_batches: 4
+  log_interval: 1
+  early_stopping:
+    enabled: false
+  multi_attack:
+    strategy: per_batch
+    include_clean: true
+    aggregation: mean
+  optimizer:
+    name: sgd
+    lr: 0.1
+    momentum: 0.9
+    weight_decay: 0.0005
+  scheduler:
+    name: cosine
+    t_max: 2
+    eta_min: 0.0
+
+attack:
+  multi_train:
+    norm: Linf
+    eps: 0.0313725
+    domains:
+      - name: clean
+        type: clean
+      - name: fgsm_rs
+        type: fgsm
+        alpha: 0.0313725
+        random_start: true
+      - name: pgd_ce
+        type: pgd
+        steps: 2
+        alpha: 0.007843
+        loss: ce
+        random_start: true
+      - name: pgd_dlr
+        type: pgd
+        steps: 2
+        alpha: 0.007843
+        loss: dlr
+        random_start: true
+
+  val:
+    name: pgd
+    eps: 0.0313725
+    step_size: 0.007843
+    num_steps: 5
+    restarts: 1
+    random_start: true
+
+  eval:
+    enabled: false
+    pgd20:
+      eps: 0.0313725
+      step_size: 0.007843
+      num_steps: 20
+      restarts: 5
+
+  autoattack:
+    enabled: false
+    eps: 0.0313725
+    norm: Linf
+    version: standard
+
+val:
+  probe:
+    enabled: true
+    type: pgd
+    norm: Linf
+    eps: 0.0313725
+    steps: 5
+    alpha: 0.007843
+    restarts: 1
+    max_batches: 2
+
+logging:
+  wandb:
+    enabled: false
+    project: ardg
+    entity: ""
+  run_name: smoke_resnet50_local_multi_attack_erm
