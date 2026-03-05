@@ -9,7 +9,7 @@ dataset:
   data_dir: /content/drive/MyDrive/ardg/data
   val_ratio: 0.02
   num_workers: 8
-  augmentation: randaugment
+  augmentation: standard
 
 model:
   name: resnet50_cifar
@@ -23,12 +23,14 @@ train:
   early_stopping:
     enabled: false
   multi_attack:
-    strategy: per_batch
+    strategy: all_domains   # mỗi step generate clean + tất cả attack domains
     include_clean: true
-    aggregation: mean
+    aggregation: mean       # code hiện tại support mean
+    checkpoint_metric: pgd20_probe_acc
+    checkpoint_tiebreakers: [worst_acc, clean_acc]
   optimizer:
     name: sgd
-    lr: 0.1
+    lr: 0.05
     momentum: 0.9
     weight_decay: 0.0005
   scheduler:
@@ -101,6 +103,6 @@ logging:
   wandb:
     enabled: true
     project: ardg
-    entity: ''
-  run_name: resnet50_colab_multi_attack_erm
+    entity: ""
+  run_name: resnet50_colab_multi_attack_erm_all_domains_full
   output_dir: /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs

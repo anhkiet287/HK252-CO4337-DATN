@@ -17,6 +17,29 @@ def _float_close(a: float, b: float, tol: float = 1e-12) -> bool:
     return abs(float(a) - float(b)) <= tol
 
 
+def resolve_multi_attack_train_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve multi-attack train config with backward-compatible alias.
+
+    Canonical key is ``train.multi_attack``.
+    Alias ``train.multi_domain`` is supported with the same schema.
+    """
+    train_cfg = cfg.get("train", {})
+    ma = train_cfg.get("multi_attack")
+    md = train_cfg.get("multi_domain")
+    has_ma = isinstance(ma, dict)
+    has_md = isinstance(md, dict)
+    if has_ma and has_md:
+        raise ValueError(
+            "Both train.multi_attack and train.multi_domain are set. "
+            "Please keep only one to avoid ambiguous configuration."
+        )
+    if has_md:
+        return dict(md)
+    if has_ma:
+        return dict(ma)
+    return {}
+
+
 class MultiAttackERM(Objective):
     """ERM on adversarial domains with configurable per-batch strategy."""
 
@@ -26,7 +49,7 @@ class MultiAttackERM(Objective):
     def __init__(self, cfg: Dict[str, Any], model: Any) -> None:
         self.cfg = cfg
         self.model = model
-        train_cfg = cfg.get("train", {}).get("multi_attack", {})
+        train_cfg = resolve_multi_attack_train_cfg(cfg)
         self.strategy = str(train_cfg.get("strategy", "per_batch")).lower()
         if self.strategy not in self._SUPPORTED_STRATEGIES:
             raise ValueError(
@@ -60,6 +83,9 @@ class MultiAttackERM(Objective):
 
         self.probe_cfg = dict(cfg.get("val", {}).get("probe", {}))
         self.probe_enabled = bool(self.probe_cfg.get("enabled", False))
+        self.val_max_batches = int(train_cfg.get("val_max_batches", self.probe_cfg.get("max_batches", 10)))
+        if self.val_max_batches < 0:
+            self.val_max_batches = 0
         self.probe_attack = None
         if self.probe_enabled:
             self.probe_attack = self._build_probe_attack(model)
@@ -270,18 +296,66 @@ class MultiAttackERM(Objective):
         return loss, metrics
 
     def validate(self, model: Any, loader: Any) -> Dict[str, float]:
-        if not self.probe_enabled or self.probe_attack is None:
-            return {}
-
-        max_batches = int(self.probe_cfg.get("max_batches", 10))
-        if max_batches <= 0:
-            return {}
+        metrics: Dict[str, float] = {}
 
         device = next(model.parameters()).device
-        total_loss = 0.0
-        total_correct = 0
-        total_seen = 0
+        domain_totals: Dict[str, Dict[str, float]] = {
+            d["name"]: {"loss": 0.0, "correct": 0.0, "seen": 0.0} for d in self.domains
+        }
+
         model.eval()
+        for step_idx, batch in enumerate(loader, start=1):
+            data = as_xy_dict(batch)
+            images = data["x"].to(device)
+            labels = data["y"].to(device)
+
+            for domain in self.domains:
+                name = str(domain["name"])
+                if domain.get("type") == "clean":
+                    attacked = images
+                else:
+                    with torch.enable_grad():
+                        attacked = self.attacks[name](images, labels).detach()
+                with torch.no_grad():
+                    logits = model(attacked)
+                    loss = compute_loss(logits, labels)
+
+                seen = float(images.size(0))
+                correct = float((logits.argmax(dim=1) == labels).sum().item())
+                domain_totals[name]["loss"] += float(loss.item()) * seen
+                domain_totals[name]["correct"] += correct
+                domain_totals[name]["seen"] += seen
+
+            if self.val_max_batches > 0 and step_idx >= self.val_max_batches:
+                break
+
+        acc_by_domain: Dict[str, float] = {}
+        for name, totals in domain_totals.items():
+            seen = max(float(totals["seen"]), 1.0)
+            loss_avg = float(totals["loss"]) / seen
+            acc_avg = float(totals["correct"]) / seen
+            metrics[f"loss_{name}"] = loss_avg
+            metrics[f"acc_{name}"] = acc_avg
+            acc_by_domain[name] = acc_avg
+
+        if acc_by_domain:
+            metrics["acc_avg"] = float(sum(acc_by_domain.values()) / len(acc_by_domain))
+            worst_domain = min(acc_by_domain, key=acc_by_domain.get)
+            metrics["acc_worst"] = float(acc_by_domain[worst_domain])
+            metrics["worst_domain"] = worst_domain
+            if "clean" in acc_by_domain:
+                metrics["acc_clean"] = float(acc_by_domain["clean"])
+
+        if not self.probe_enabled or self.probe_attack is None:
+            return metrics
+
+        probe_max_batches = int(self.probe_cfg.get("max_batches", 10))
+        if probe_max_batches <= 0:
+            return metrics
+
+        probe_total_loss = 0.0
+        probe_total_correct = 0
+        probe_total_seen = 0
         for step_idx, batch in enumerate(loader, start=1):
             data = as_xy_dict(batch)
             images = data["x"].to(device)
@@ -291,12 +365,12 @@ class MultiAttackERM(Objective):
             with torch.no_grad():
                 logits = model(adv)
                 loss = compute_loss(logits, labels)
-            total_loss += float(loss.item()) * images.size(0)
-            total_correct += int((logits.argmax(dim=1) == labels).sum().item())
-            total_seen += int(images.size(0))
-            if step_idx >= max_batches:
+            probe_total_loss += float(loss.item()) * images.size(0)
+            probe_total_correct += int((logits.argmax(dim=1) == labels).sum().item())
+            probe_total_seen += int(images.size(0))
+            if step_idx >= probe_max_batches:
                 break
-        return {
-            "pgd20_probe_loss": total_loss / max(total_seen, 1),
-            "pgd20_probe_acc": total_correct / max(total_seen, 1),
-        }
+
+        metrics["pgd20_probe_loss"] = probe_total_loss / max(probe_total_seen, 1)
+        metrics["pgd20_probe_acc"] = probe_total_correct / max(probe_total_seen, 1)
+        return metrics

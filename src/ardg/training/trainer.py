@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 
 from ardg.training.losses import compute_loss
 from ardg.training.objectives import build_objective
+from ardg.training.objectives.multi_attack_erm import resolve_multi_attack_train_cfg
 from ardg.utils.batch import move_to_device, unpack_xy
 from ardg.utils.logging import log_metrics
 from ardg.utils.paths import ensure_dir, get_run_dir
@@ -80,7 +81,10 @@ class Trainer:
         # build loss function 
         self.objective = build_objective(cfg, model)
         self.best_metric = float("-inf")
+        self.best_metric_name = "acc"
         self.best_epoch = 0
+        self.best_vector: Optional[tuple[float, ...]] = None
+        self.ckpt_eps = 1e-6
         self.best_ckpt_path: Optional[str] = None
 
         # early stopping
@@ -133,10 +137,11 @@ class Trainer:
             train_mode = str(self.cfg.get("train", {}).get("mode", "")).lower()
             ckpt_metric_name = "acc"
             ckpt_metric = val_acc
+            ckpt_vector = (ckpt_metric,)
             if train_mode in {"multi_attack_erm", "multi-attack-erm", "multi_attack"}:
-                if "pgd20_probe_acc" in val_metrics:
-                    ckpt_metric_name = "pgd20_probe_acc"
-                    ckpt_metric = float(val_metrics["pgd20_probe_acc"])
+                ckpt_metric_name, ckpt_metric, ckpt_vector = self._select_multi_attack_checkpoint(
+                    val_metrics
+                )
 
             try:
                 self.objective.on_epoch_end(epoch, {"train": self.train_loader, "val": self.val_loader})
@@ -144,9 +149,12 @@ class Trainer:
                 pass
             
             # select best model 
-            if ckpt_metric >= self.best_metric:
+            is_better = self._is_better_checkpoint(ckpt_vector, self.best_vector, self.ckpt_eps)
+            if is_better:
                 self.best_metric = ckpt_metric
+                self.best_metric_name = ckpt_metric_name
                 self.best_epoch = epoch
+                self.best_vector = tuple(ckpt_vector)
                 self.best_ckpt_path = self._save_checkpoint(
                     "best",
                     {
@@ -157,6 +165,16 @@ class Trainer:
                         "val_loss": float(val_metrics.get("loss", 0.0)),
                     },
                     epoch,
+                )
+                log_metrics(
+                    self.logger,
+                    {
+                        "metric_name": ckpt_metric_name,
+                        "epoch": epoch,
+                        "score": ckpt_metric,
+                    },
+                    self.global_step,
+                    "best",
                 )
 
             last_ckpt_path = self._save_checkpoint(
@@ -222,7 +240,12 @@ class Trainer:
             self.best_metric = float(checkpoint["best_metric"])
         else:
             self.best_metric = float(metrics.get("val_acc", self.best_metric))
+        self.best_metric_name = str(checkpoint.get("best_metric_name", self.best_metric_name))
         self.best_epoch = int(checkpoint.get("best_epoch", resumed_epoch))
+        if isinstance(checkpoint.get("best_vector"), (list, tuple)):
+            self.best_vector = tuple(float(x) for x in checkpoint["best_vector"])
+        elif checkpoint.get("best_metric") is not None:
+            self.best_vector = (float(checkpoint["best_metric"]),)
 
         if checkpoint.get("es_state") and isinstance(checkpoint["es_state"], dict):
             es_state = checkpoint["es_state"]
@@ -256,6 +279,71 @@ class Trainer:
             "global_step": self.global_step,
             "wandb_run_id": self.wandb_run_id,
         }
+
+    def _select_multi_attack_checkpoint(
+        self, val_metrics: Dict[str, float]
+    ) -> tuple[str, float, tuple[float, ...]]:
+        cfg_ma = resolve_multi_attack_train_cfg(self.cfg)
+        probe_cfg = self.cfg.get("val", {}).get("probe", {})
+        probe_enabled = bool(probe_cfg.get("enabled", False))
+
+        primary_token = str(cfg_ma.get("checkpoint_metric", "")).strip().lower()
+        if not primary_token:
+            primary_token = "pgd20_probe_acc" if probe_enabled else "worst_acc"
+
+        primary_token = _normalize_ckpt_token(primary_token)
+        primary_name, primary_value = _resolve_ckpt_metric_value(primary_token, val_metrics)
+        if primary_name == "pgd20_probe_acc" and primary_value == float("-inf"):
+            primary_name, primary_value = _resolve_ckpt_metric_value("worst_acc", val_metrics)
+            if primary_value == float("-inf"):
+                primary_name, primary_value = _resolve_ckpt_metric_value("clean_acc", val_metrics)
+
+        raw_tiebreakers = cfg_ma.get("checkpoint_tiebreakers")
+        if isinstance(raw_tiebreakers, str):
+            tie_tokens = [
+                _normalize_ckpt_token(part.strip())
+                for part in raw_tiebreakers.split(",")
+                if part.strip()
+            ]
+        elif isinstance(raw_tiebreakers, list):
+            tie_tokens = [_normalize_ckpt_token(str(x)) for x in raw_tiebreakers]
+        else:
+            if primary_name == "pgd20_probe_acc":
+                tie_tokens = ["worst_acc", "clean_acc"]
+            else:
+                tie_tokens = ["avg_acc", "clean_acc"]
+
+        ordered_tokens = [primary_name]
+        for token in tie_tokens:
+            if token not in ordered_tokens:
+                ordered_tokens.append(token)
+
+        vector: list[float] = []
+        resolved_names: list[str] = []
+        for token in ordered_tokens:
+            name, value = _resolve_ckpt_metric_value(token, val_metrics)
+            resolved_names.append(name)
+            vector.append(value)
+
+        return resolved_names[0], vector[0], tuple(vector)
+
+    @staticmethod
+    def _is_better_checkpoint(
+        candidate: tuple[float, ...],
+        current_best: Optional[tuple[float, ...]],
+        eps: float,
+    ) -> bool:
+        if current_best is None:
+            return True
+        max_len = max(len(candidate), len(current_best))
+        for idx in range(max_len):
+            cand = candidate[idx] if idx < len(candidate) else float("-inf")
+            best = current_best[idx] if idx < len(current_best) else float("-inf")
+            if cand > best + eps:
+                return True
+            if cand < best - eps:
+                return False
+        return False
 
     def _update_early_stopping(self, epoch: int, val_metrics: Dict[str, float]) -> bool:
         if not self.es_enabled:
@@ -396,7 +484,9 @@ class Trainer:
             "epoch": epoch_value,
             "global_step": int(self.global_step),
             "best_metric": float(self.best_metric),
+            "best_metric_name": str(self.best_metric_name),
             "best_epoch": int(self.best_epoch),
+            "best_vector": list(self.best_vector) if self.best_vector is not None else None,
             "es_state": {
                 "enabled": bool(self.es_enabled),
                 "best_metric": float(self.es_best_metric),
@@ -417,3 +507,37 @@ class Trainer:
 def _normalize_es_metric_key(metric: Any) -> str:
     key = str(metric or "acc").strip().lower().replace("val/", "").replace("val_", "")
     return key
+
+
+def _normalize_ckpt_token(token: str) -> str:
+    normalized = token.strip().lower().replace("val/", "").replace("val_", "")
+    alias = {
+        "worst": "worst_acc",
+        "acc_worst": "worst_acc",
+        "worst_acc": "worst_acc",
+        "avg": "avg_acc",
+        "acc_avg": "avg_acc",
+        "avg_acc": "avg_acc",
+        "clean": "clean_acc",
+        "acc_clean": "clean_acc",
+        "clean_acc": "clean_acc",
+        "pgd20_probe": "pgd20_probe_acc",
+        "pgd20_probe_acc": "pgd20_probe_acc",
+    }
+    return alias.get(normalized, normalized)
+
+
+def _resolve_ckpt_metric_value(token: str, metrics: Dict[str, float]) -> tuple[str, float]:
+    if token == "pgd20_probe_acc":
+        return "pgd20_probe_acc", float(metrics.get("pgd20_probe_acc", float("-inf")))
+    if token == "worst_acc":
+        value = metrics.get("acc_worst", metrics.get("acc", float("-inf")))
+        return "worst_acc", float(value)
+    if token == "avg_acc":
+        value = metrics.get("acc_avg", metrics.get("acc", float("-inf")))
+        return "avg_acc", float(value)
+    if token == "clean_acc":
+        value = metrics.get("acc_clean", metrics.get("acc", float("-inf")))
+        return "clean_acc", float(value)
+    # Fallback: direct metric key in val_metrics
+    return token, float(metrics.get(token, float("-inf")))

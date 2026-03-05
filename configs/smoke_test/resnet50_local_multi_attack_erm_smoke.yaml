@@ -32,6 +32,8 @@ train:
     strategy: per_batch
     include_clean: true
     aggregation: mean
+    checkpoint_metric: pgd20_probe_acc
+    checkpoint_tiebreakers: [worst_acc, clean_acc]
   optimizer:
     name: sgd
     lr: 0.1
