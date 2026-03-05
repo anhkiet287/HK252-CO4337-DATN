@@ -15,7 +15,6 @@ python3 -m py_compile \
 PYTHONPATH=src python3 scripts/evaluate.py \
   --config configs/local/resnet50/at/multi_attack_erm.yaml \
   --checkpoint outputs/resnet50_local_multi_attack_erm/best.pt \
-  --splits val,test \
   2>&1 | tee plan/evaluate-pipeline/evidence/02_attack_suite/eval_multi_attack.log
 
 # 2) Save qualitative attack visuals for report evidence

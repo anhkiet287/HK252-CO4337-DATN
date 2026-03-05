@@ -18,10 +18,17 @@ This folder stores implementation plans and execution tracking per pipeline and 
 
 ## Workflow
 1. Draft or update `plan.md` before coding.
-2. Record major decisions in `decisions.md`.
-3. Update `progress.md` after each implementation session.
-4. Add executed checks and outcomes in `validation.md`.
-5. Update `INDEX.md` status.
+2. Implement and debug locally.
+3. Run local verification gate before any full run:
+   - `scripts/preflight_check.py`
+   - smoke train (short config/epochs)
+   - smoke evaluate (`scripts/evaluate.py` with reduced batches)
+4. Record major decisions in `decisions.md`.
+5. Update `progress.md` after each implementation session.
+6. Add executed checks and outcomes in `validation.md`.
+7. Run full report experiment on Colab only, with output dir:
+   - `/content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs`
+8. Update `INDEX.md` status.
 
 ## Where To Document What
 - Correctness verification evidence: `<folder>/evidence/` + `<folder>/validation.md`

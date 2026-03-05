@@ -30,18 +30,23 @@ train:
     eta_min: 0.0
 
 attack:
-  eval:
+  eval_suite:
     enabled: true
-    pgd20:
-      eps: 0.0313725
-      step_size: 0.007843
-      num_steps: 20
-      restarts: 5
-  autoattack:
-    enabled: true
-    eps: 0.0313725
-    norm: Linf
-    version: standard
+    max_batches: 0
+    attacks:
+      - label: pgd20
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 20
+        restarts: 5
+      - label: autoattack
+        type: autoattack
+        eps: 0.0313725
+        norm: Linf
+        version: standard
+        n_classes: 10
+        verbose: false
 
 logging:
   wandb:

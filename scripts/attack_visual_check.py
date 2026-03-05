@@ -108,6 +108,19 @@ def _build_all_attack_specs(eps: float, alpha: float, *, fast: bool) -> List[Dic
     ]
 
 
+def _first_suite_spec(raw_suite: Any) -> Dict[str, Any]:
+    if isinstance(raw_suite, list):
+        return dict(raw_suite[0]) if raw_suite else {}
+    if not isinstance(raw_suite, dict):
+        return {}
+    attacks = raw_suite.get("attacks")
+    if isinstance(attacks, list) and attacks:
+        return dict(attacks[0])
+    if "type" in raw_suite or "name" in raw_suite:
+        return dict(raw_suite)
+    return {}
+
+
 def _resolve_attack(
     model: Any,
     cfg: Dict[str, Any],
@@ -115,19 +128,28 @@ def _resolve_attack(
     attack_override: str,
 ) -> Tuple[Any, float | None, str]:
     dataset_name = str(cfg["dataset"]["name"])
+    attack_cfg_all = cfg.get("attack", {})
 
     if source == "train":
         if attack_override == "from_source":
-            atk_cfg = dict(cfg["attack"]["train"])
+            atk_cfg = dict(attack_cfg_all.get("train", {}) or _first_suite_spec(attack_cfg_all.get("train_suite")))
             eps = atk_cfg.get("eps")
-            return build_train_attack(cfg, model), (float(eps) if eps is not None else None), str(atk_cfg.get("name", "pgd"))
-        atk_cfg = dict(cfg["attack"]["train"])
+            return (
+                build_train_attack(cfg, model),
+                (float(eps) if eps is not None else None),
+                str(atk_cfg.get("name", atk_cfg.get("type", "pgd"))),
+            )
+        atk_cfg = dict(attack_cfg_all.get("train", {}) or _first_suite_spec(attack_cfg_all.get("train_suite")))
     elif source == "val":
         if attack_override == "from_source":
-            atk_cfg = dict(cfg["attack"]["val"])
+            atk_cfg = dict(attack_cfg_all.get("val", {}) or _first_suite_spec(attack_cfg_all.get("val_suite")))
             eps = atk_cfg.get("eps")
-            return build_val_attack(cfg, model), (float(eps) if eps is not None else None), str(atk_cfg.get("name", "pgd"))
-        atk_cfg = dict(cfg["attack"]["val"])
+            return (
+                build_val_attack(cfg, model),
+                (float(eps) if eps is not None else None),
+                str(atk_cfg.get("name", atk_cfg.get("type", "pgd"))),
+            )
+        atk_cfg = dict(attack_cfg_all.get("val", {}) or _first_suite_spec(attack_cfg_all.get("val_suite")))
     else:
         if attack_override == "from_source":
             attacks = build_eval_attacks(cfg, model)

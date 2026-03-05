@@ -38,6 +38,6 @@ PY
 
 # 5) Evaluate
 PYTHONPATH=src python3 scripts/evaluate.py \
-  --config configs/local/resnet50/at/multi_attack_erm.yaml --splits val,test \
+  --config configs/local/resnet50/at/multi_attack_erm.yaml \
   | tee plan/multi-attack-baseline/evidence/05_eval/eval_log.txt
 ```

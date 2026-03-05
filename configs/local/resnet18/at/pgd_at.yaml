@@ -37,14 +37,65 @@ attack:
     eps: 0.0313725
     step_size: 0.007843
     num_steps: 20
-  eval:
-    name: attack_suite
-    eps: 0.0313725
-    step_size: 0.007843
-    num_steps: 20
-  autoattack:
-    enabled: true
-    eps: 0.0313725
+  eval_suite:
+    max_batches: 0
+    attacks:
+      - label: fgsm
+        type: fgsm
+        eps: 0.0313725
+      - label: fgsm_rs
+        type: fgsm_rs
+        eps: 0.0313725
+        alpha: 0.0313725
+      - label: pgd10_ce
+        type: pgd
+        eps: 0.0313725
+        alpha: 0.007843
+        steps: 10
+        loss: ce
+        random_start: true
+      - label: pgd20
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 20
+        restarts: 5
+        loss: ce
+        random_start: true
+      - label: pgd10_dlr
+        type: pgd
+        eps: 0.0313725
+        alpha: 0.007843
+        steps: 10
+        loss: dlr
+        random_start: true
+      - label: cw_l2
+        type: cw
+        steps: 50
+        lr: 0.01
+      - label: deepfool_l2
+        type: deepfool
+        steps: 50
+        overshoot: 0.02
+      - label: fab_linf
+        type: fab
+        norm: Linf
+        eps: 0.0313725
+        steps: 30
+        restarts: 1
+      - label: square_linf
+        type: square
+        norm: Linf
+        eps: 0.0313725
+        n_queries: 5000
+        restarts: 1
+      - label: autoattack
+        type: autoattack
+        norm: Linf
+        eps: 0.0313725
+        version: standard
+        n_classes: 10
+        verbose: false
 logging:
   wandb:
     enabled: true

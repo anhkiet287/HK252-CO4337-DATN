@@ -11,8 +11,22 @@ Current implemented training modes:
 - `groupdro_plus`
 
 Attack backend:
-- Training/eval attacks: `torchattacks`
-- Optional eval-only AutoAttack: `autoattack`
+- Training/eval attacks (including AutoAttack in eval suite): `torchattacks`
+
+## 0) Execution Flow Policy
+
+Use this flow for all future implementations:
+
+1. Local first (implementation and debugging):
+   - code changes
+   - preflight check
+   - smoke train (short run)
+   - smoke evaluate (`scripts/evaluate.py` with small `--max-batches`)
+   - optional attack visualization sanity
+2. Move to Colab only after local smoke checks pass.
+3. Full report runs are Colab-only.
+4. Colab output directory is fixed:
+   - `/content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs`
 
 ## 1) Setup
 
@@ -99,15 +113,47 @@ PYTHONPATH=src python3 scripts/train.py --config configs/local/resnet18/at/group
 Generic:
 
 ```bash
-PYTHONPATH=src python3 scripts/evaluate.py --config <CONFIG_PATH> --checkpoint <CKPT_PATH> --splits val,test
+PYTHONPATH=src python3 scripts/evaluate.py --config <CONFIG_PATH> --checkpoint <CKPT_PATH>
+```
+
+Smoke (exactly 1 test sample):
+
+```bash
+PYTHONPATH=src python3 scripts/evaluate.py \
+  --config <CONFIG_PATH> \
+  --checkpoint <CKPT_PATH> \
+  --smoke-one-sample
 ```
 
 If `--checkpoint` is omitted, evaluator tries `best.pt` then `last.pt` in the run directory for that config.
 
 Evaluation behavior:
+- evaluates test split only
 - always logs clean accuracy
-- runs attack suite from `attack.eval` (currently requires `pgd20`)
-- runs AutoAttack only if `attack.autoattack.enabled: true`
+- runs attack suite from `attack.eval_suite.attacks`
+- supports single-attack or multi-attack suites from config
+- backward compatible with legacy `attack.eval` + `attack.autoattack` configs
+
+Minimal `eval_suite` example:
+
+```yaml
+attack:
+  eval_suite:
+    max_batches: 0
+    attacks:
+      - label: pgd20
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 20
+        restarts: 5
+      - label: autoattack
+        type: autoattack
+        norm: Linf
+        eps: 0.0313725
+        version: standard
+        n_classes: 10
+```
 
 ## 5) Preflight Checks
 
