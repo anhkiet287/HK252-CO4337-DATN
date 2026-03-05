@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 
 from ardg.training.losses import compute_loss
 from ardg.training.objectives import build_objective
+from ardg.utils.batch import move_to_device, unpack_xy
 from ardg.utils.logging import log_metrics
 from ardg.utils.paths import ensure_dir, get_run_dir
 
@@ -346,10 +347,7 @@ class Trainer:
         total_seen = 0
         with torch.no_grad():
             for step_idx, batch in enumerate(self.val_loader, start=1):
-                if isinstance(batch, dict):
-                    images, labels = batch["x"], batch["y"]
-                else:
-                    images, labels = batch
+                images, labels = unpack_xy(batch)
                 images = images.to(self.device)
                 labels = labels.to(self.device)
                 logits = self.model(images)
@@ -373,7 +371,7 @@ class Trainer:
 
     def _train_step(self, batch: Any) -> Dict[str, Any]:
         """Run a single training step."""
-        batch = _to_device(batch, self.device)
+        batch = move_to_device(batch, self.device)
         batch = self.objective.preprocess_batch(batch, self.model)
 
         self.optimizer.zero_grad(set_to_none=True)
@@ -415,19 +413,6 @@ class Trainer:
         if self.max_train_batches:
             return min(full_steps, int(self.max_train_batches))
         return full_steps
-
-
-def _to_device(batch: Any, device: torch.device) -> Any:
-    """Recursively move tensors in batch to device."""
-    if isinstance(batch, dict):
-        return {k: (v.to(device) if hasattr(v, "to") else v) for k, v in batch.items()}
-    if isinstance(batch, (list, tuple)):
-        moved = []
-        for item in batch:
-            moved.append(item.to(device) if hasattr(item, "to") else item)
-        return tuple(moved)
-    return batch.to(device) if hasattr(batch, "to") else batch
-
 
 def _normalize_es_metric_key(metric: Any) -> str:
     key = str(metric or "acc").strip().lower().replace("val/", "").replace("val_", "")

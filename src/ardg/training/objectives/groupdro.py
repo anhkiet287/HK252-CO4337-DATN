@@ -9,6 +9,7 @@ import torch
 from ardg.training.losses import compute_loss
 from ardg.training.objectives.base import Objective
 from ardg.attacks.attack_suite import build_train_attack
+from ardg.utils.batch import unpack_xyg
 
 
 class GroupDRO(Objective):
@@ -25,7 +26,7 @@ class GroupDRO(Objective):
     def preprocess_batch(self, batch: Any, model: Any) -> Any:
         if self.attack is None:
             return batch
-        images, labels, groups = _unpack_batch(batch)
+        images, labels, groups = unpack_xyg(batch)
         model.eval()
         adv = self.attack(images, labels)
         model.train()
@@ -42,7 +43,7 @@ class GroupDRO(Objective):
             self.q = torch.ones(num_groups, device=device) / float(num_groups)
 
     def loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
-        images, labels, groups = _unpack_batch(batch)
+        images, labels, groups = unpack_xyg(batch)
         device = labels.device
         num_groups = int(groups.max().item()) + 1
         self._maybe_init_q(num_groups, device)
@@ -78,15 +79,3 @@ class GroupDRO(Objective):
         for g in range(min(3, num_groups)):
             metrics[f"loss_g{g}"] = float(loss_g[g].item())
         return total, metrics
-
-
-def _unpack_batch(batch: Any):
-    if isinstance(batch, dict):
-        g = batch.get("g", batch.get("y"))
-        if g is None:
-            raise ValueError("GroupDRO expects group ids; provide batch['g'] or fallback to labels.")
-        return batch["x"], batch["y"], g
-    if len(batch) != 3:
-        images, labels = batch
-        return images, labels, labels
-    return batch

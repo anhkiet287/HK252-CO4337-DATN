@@ -1,5 +1,32 @@
 # Progress Log
 
+## 2026-03-05 — Evidence Scope Simplified
+- Work completed:
+  - Reduced evidence checklist to only 6 required checks:
+    - normalization
+    - attack space
+    - split correctness
+    - batch size correctness
+    - domain generation logic
+    - deterministic behavior
+  - Updated evidence command guide accordingly.
+- Files touched:
+  - `plan/multi-attack-baseline/validation.md`
+  - `plan/multi-attack-baseline/evidence/README.md`
+  - `plan/multi-attack-baseline/progress.md`
+
+## 2026-03-05 — Implementation Audit
+- Work completed:
+  - Audited `multi_attack_erm` implementation against `plan.md` core requirements.
+  - Added concise match/gap documentation to `validation.md`.
+- Files touched:
+  - `plan/multi-attack-baseline/validation.md`
+  - `plan/multi-attack-baseline/progress.md`
+- Key outcome:
+  - Core v1 plan is matched at objective, trainer checkpoint rule, attack space handling, and config level.
+- Remaining:
+  - Keep collecting runtime evidence artifacts for report packaging.
+
 ## 2026-03-04 — In Progress
 - Work completed:
   - Added minimal report template: `plan/multi-attack-baseline/report.md`.

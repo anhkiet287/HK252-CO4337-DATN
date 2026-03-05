@@ -10,20 +10,11 @@ import torch
 from ardg.attacks.attack_suite import build_attack
 from ardg.training.losses import compute_loss
 from ardg.training.objectives.base import Objective
+from ardg.utils.batch import as_xy_dict
 
 
 def _float_close(a: float, b: float, tol: float = 1e-12) -> bool:
     return abs(float(a) - float(b)) <= tol
-
-
-def _batch_to_dict(batch: Any) -> Dict[str, Any]:
-    if isinstance(batch, dict):
-        if "x" not in batch or "y" not in batch:
-            raise ValueError("Batch dict must contain 'x' and 'y'.")
-        return dict(batch)
-    if isinstance(batch, (list, tuple)) and len(batch) >= 2:
-        return {"x": batch[0], "y": batch[1]}
-    raise ValueError("Unsupported batch format for MultiAttackERM.")
 
 
 class MultiAttackERM(Objective):
@@ -177,7 +168,7 @@ class MultiAttackERM(Objective):
         return adv
 
     def preprocess_batch(self, batch: Any, model: Any) -> Any:
-        data = _batch_to_dict(batch)
+        data = as_xy_dict(batch)
         images = data["x"]
         labels = data["y"]
         batch_size = int(labels.size(0))
@@ -235,7 +226,7 @@ class MultiAttackERM(Objective):
         raise ValueError(f"Unsupported strategy: {self.strategy}")
 
     def loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, Any]]:
-        data = _batch_to_dict(batch)
+        data = as_xy_dict(batch)
         labels = data["y"]
         batch_size = int(labels.size(0))
 
@@ -292,7 +283,7 @@ class MultiAttackERM(Objective):
         total_seen = 0
         model.eval()
         for step_idx, batch in enumerate(loader, start=1):
-            data = _batch_to_dict(batch)
+            data = as_xy_dict(batch)
             images = data["x"].to(device)
             labels = data["y"].to(device)
             with torch.enable_grad():

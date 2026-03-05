@@ -9,6 +9,7 @@ import torch
 from ardg.training.losses import compute_loss
 from ardg.training.objectives.base import Objective
 from ardg.attacks.attack_suite import build_train_attack
+from ardg.utils.batch import unpack_xy
 
 
 class REx(Objective):
@@ -25,7 +26,7 @@ class REx(Objective):
     def preprocess_batch(self, batch: Any, model: Any) -> Any:
         if self.attack is None:
             return batch
-        images, labels = _unpack_batch(batch)
+        images, labels = unpack_xy(batch)
         model.eval()
         adv = self.attack(images, labels)
         model.train()
@@ -37,7 +38,7 @@ class REx(Objective):
         return adv, labels
 
     def loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
-        images, labels = _unpack_batch(batch)
+        images, labels = unpack_xy(batch)
         logits = model(images)
         base_loss = compute_loss(logits, labels)
 
@@ -68,9 +69,3 @@ class REx(Objective):
             "batch_size": labels.size(0),
         }
         return loss, metrics
-
-
-def _unpack_batch(batch: Any):
-    if isinstance(batch, dict):
-        return batch["x"], batch["y"]
-    return batch

@@ -9,7 +9,7 @@ dataset:
   name: cifar10
   data_dir: data
   val_ratio: 0.02
-  num_workers: 4
+  num_workers: 0
   augmentation: randaugment
   max_train_samples: 512
   max_val_samples: 128
@@ -74,19 +74,8 @@ attack:
     restarts: 1
     random_start: true
 
-  eval:
+  eval_suite:
     enabled: false
-    pgd20:
-      eps: 0.0313725
-      step_size: 0.007843
-      num_steps: 20
-      restarts: 5
-
-  autoattack:
-    enabled: false
-    eps: 0.0313725
-    norm: Linf
-    version: standard
 
 val:
   probe:

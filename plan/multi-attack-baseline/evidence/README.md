@@ -1,12 +1,20 @@
 # Evidence Folder Guide (Minimal)
 
+## Scope
+Only keep evidence for these 6 checks:
+1. normalized pipeline
+2. attack space
+3. split correctness (`train/val/test`)
+4. batch size correctness
+5. domain generation logic per batch
+6. deterministic behavior
+
 ## Layout
-- `01_preflight/`: IO/epsilon sanity logs.
-- `02_attack_space/`: clean/adv/perturbation images + `stats.json`.
-- `03_training/`: training logs (smoke/full).
-- `04_checkpoint_rule/`: extracted checkpoint metrics.
-- `05_eval/`: evaluation logs/metrics.
-- `06_regression/`: ERM/PGD-AT regression run logs.
+- `01_preflight/`: normalization sanity logs.
+- `02_attack_space/`: clean/adv/perturbation + `stats.json`.
+- `03_split/`: split size/batch count snapshot.
+- `03_training/`: smoke training log (batch size + domain logic evidence).
+- `06_deterministic/`: repeated eval jsons for reproducibility check.
 
 ## Minimal Commands
 ```bash
@@ -28,16 +36,17 @@ PYTHONPATH=src python3 scripts/attack_visual_check.py \
   --num-samples 16 --strict-eps \
   --output-dir plan/multi-attack-baseline/evidence/02_attack_space
 
-# 4) Checkpoint metric extraction
-PYTHONPATH=src python3 - <<'PY' \
-> plan/multi-attack-baseline/evidence/04_checkpoint_rule/best_checkpoint_metrics.json
-import json, torch
-ckpt = torch.load("outputs/smoke_resnet50_local_multi_attack_erm/best.pt", map_location="cpu")
-print(json.dumps(ckpt.get("metrics", {}), indent=2))
+# 4) Split snapshot
+PYTHONPATH=src python3 - <<'PY' > plan/multi-attack-baseline/evidence/03_split/split_sizes.txt
+from ardg.config import load_config
+from ardg.experiments.common import build_loaders
+cfg = load_config("configs/local/resnet50/at/multi_attack_erm.yaml")
+tr, va, te = build_loaders(cfg)
+print({"train_batches": len(tr), "val_batches": len(va), "test_batches": len(te)})
+print({"train_samples": len(tr.dataset), "val_samples": len(va.dataset), "test_samples": len(te.dataset)})
 PY
 
-# 5) Evaluate
-PYTHONPATH=src python3 scripts/evaluate.py \
-  --config configs/local/resnet50/at/multi_attack_erm.yaml \
-  | tee plan/multi-attack-baseline/evidence/05_eval/eval_log.txt
+# 5) Deterministic check (same run twice)
+WANDB_MODE=disabled PYTHONPATH=src python3 scripts/evaluate.py --config configs/local/resnet18/at/groupdro_plus.yaml --checkpoint models/ta50.tar --smoke-one-sample --seed 42 --deterministic --save-json plan/multi-attack-baseline/evidence/06_deterministic/eval_run1.json
+WANDB_MODE=disabled PYTHONPATH=src python3 scripts/evaluate.py --config configs/local/resnet18/at/groupdro_plus.yaml --checkpoint models/ta50.tar --smoke-one-sample --seed 42 --deterministic --save-json plan/multi-attack-baseline/evidence/06_deterministic/eval_run2.json
 ```

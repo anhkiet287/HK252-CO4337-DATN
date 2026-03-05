@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import torch
-from torchvision.utils import make_grid, save_image
+from torchvision.utils import draw_bounding_boxes, make_grid, save_image
 
 from ardg.attacks.attack_suite import build_attack, build_eval_attacks, build_train_attack, build_val_attack
 from ardg.config import DEFAULT_CONFIG_PATH, load_config
@@ -47,6 +47,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Optional class id filter. If set, only visualize this class.",
+    )
+    parser.add_argument(
+        "--train-domain",
+        type=str,
+        default=None,
+        help="Optional domain name when attack-source=train and config uses attack.multi_train.domains.",
     )
     parser.add_argument(
         "--num-workers",
@@ -121,24 +127,79 @@ def _first_suite_spec(raw_suite: Any) -> Dict[str, Any]:
     return {}
 
 
+def _select_multi_train_domain_spec(cfg: Dict[str, Any], train_domain: str | None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    attack_cfg = cfg.get("attack", {})
+    multi_train = attack_cfg.get("multi_train", {})
+    domains = multi_train.get("domains", [])
+    if not isinstance(domains, list) or not domains:
+        raise ValueError("attack.multi_train.domains is missing or empty.")
+
+    selected: Dict[str, Any] | None = None
+    if train_domain is not None:
+        for d in domains:
+            if str(d.get("name", "")).strip() == str(train_domain).strip():
+                selected = dict(d)
+                break
+        if selected is None:
+            domain_names = [str(d.get("name", "")) for d in domains]
+            raise ValueError(
+                f"Requested --train-domain={train_domain!r} not found in attack.multi_train.domains: {domain_names}"
+            )
+    else:
+        for d in domains:
+            d_type = str(d.get("type", d.get("name", ""))).strip().lower()
+            if d_type != "clean":
+                selected = dict(d)
+                break
+        if selected is None:
+            selected = dict(domains[0])
+
+    selected.setdefault("type", selected.get("name", "pgd"))
+    shared_eps = multi_train.get("eps")
+    shared_norm = multi_train.get("norm")
+    if shared_eps is not None and selected.get("eps") is None:
+        selected["eps"] = float(shared_eps)
+    if shared_norm is not None and selected.get("norm") is None and str(selected.get("type", "")).lower() != "clean":
+        selected["norm"] = str(shared_norm)
+    return selected, dict(multi_train)
+
+
 def _resolve_attack(
     model: Any,
     cfg: Dict[str, Any],
     source: str,
     attack_override: str,
+    train_domain: str | None = None,
 ) -> Tuple[Any, float | None, str]:
     dataset_name = str(cfg["dataset"]["name"])
     attack_cfg_all = cfg.get("attack", {})
 
     if source == "train":
         if attack_override == "from_source":
-            atk_cfg = dict(attack_cfg_all.get("train", {}) or _first_suite_spec(attack_cfg_all.get("train_suite")))
-            eps = atk_cfg.get("eps")
-            return (
-                build_train_attack(cfg, model),
-                (float(eps) if eps is not None else None),
-                str(atk_cfg.get("name", atk_cfg.get("type", "pgd"))),
-            )
+            has_legacy_train = bool(attack_cfg_all.get("train", {})) or bool(_first_suite_spec(attack_cfg_all.get("train_suite")))
+            if has_legacy_train:
+                atk_cfg = dict(attack_cfg_all.get("train", {}) or _first_suite_spec(attack_cfg_all.get("train_suite")))
+                eps = atk_cfg.get("eps")
+                return (
+                    build_train_attack(cfg, model),
+                    (float(eps) if eps is not None else None),
+                    str(atk_cfg.get("name", atk_cfg.get("type", "pgd"))),
+                )
+
+            if "multi_train" in attack_cfg_all:
+                atk_cfg, multi_train = _select_multi_train_domain_spec(cfg, train_domain)
+                attack = build_attack(
+                    atk_cfg,
+                    model,
+                    dataset_name=dataset_name,
+                    shared_norm=multi_train.get("norm"),
+                    shared_eps=multi_train.get("eps"),
+                )
+                eps = atk_cfg.get("eps", multi_train.get("eps"))
+                attack_name = str(atk_cfg.get("name", atk_cfg.get("type", "pgd")))
+                return attack, (float(eps) if eps is not None else None), attack_name
+
+            raise ValueError("No train attack configured. Set attack.train/train_suite or attack.multi_train.")
         atk_cfg = dict(attack_cfg_all.get("train", {}) or _first_suite_spec(attack_cfg_all.get("train_suite")))
     elif source == "val":
         if attack_override == "from_source":
@@ -182,13 +243,14 @@ def _resolve_all_attacks(
     cfg: Dict[str, Any],
     source: str,
     fast: bool,
+    train_domain: str | None = None,
 ) -> Dict[str, Tuple[Any, float | None, str]]:
     dataset_name = str(cfg["dataset"]["name"])
     eps, alpha = _resolve_eps_alpha(cfg)
     attacks: Dict[str, Tuple[Any, float | None, str]] = {}
 
     # Include the exact configured training/val/eval source attack to verify parity with training logic.
-    src_attack, src_eps, src_name = _resolve_attack(model, cfg, source, "from_source")
+    src_attack, src_eps, src_name = _resolve_attack(model, cfg, source, "from_source", train_domain=train_domain)
     attacks[f"{source}_from_source"] = (src_attack, src_eps, src_name)
 
     for spec in _build_all_attack_specs(eps, alpha, fast=fast):
@@ -263,6 +325,108 @@ def _save_grid(x: torch.Tensor, path: Path) -> None:
     save_image(grid, path)
 
 
+def _save_side_by_side_comparison(
+    images: torch.Tensor,
+    labels: torch.Tensor,
+    model: Any,
+    adv_norm_by_attack: Dict[str, torch.Tensor],
+    mean_t: torch.Tensor,
+    std_t: torch.Tensor,
+    out_dir: Path,
+) -> Dict[str, Any]:
+    """Save one comparison grid with clean + all attacks side by side."""
+    if len(adv_norm_by_attack) < 2:
+        return {}
+
+    images_cpu = images.detach().cpu()
+    labels_cpu = labels.detach().cpu().long()
+    mean_cpu = mean_t.detach().cpu()
+    std_cpu = std_t.detach().cpu()
+
+    clean_pixel = torch.clamp(_to_pixel(images_cpu, mean_cpu, std_cpu), 0.0, 1.0)
+    attack_labels = list(adv_norm_by_attack.keys())
+
+    with torch.no_grad():
+        clean_pred = model(images).argmax(dim=1).detach().cpu().long()
+
+    adv_pixel_map: Dict[str, torch.Tensor] = {}
+    delta_vis_map: Dict[str, torch.Tensor] = {}
+    adv_pred_map: Dict[str, torch.Tensor] = {}
+    for label in attack_labels:
+        adv_norm = adv_norm_by_attack[label].detach().cpu()
+        with torch.no_grad():
+            pred = model(adv_norm.to(images.device)).argmax(dim=1).detach().cpu().long()
+        adv_pred_map[label] = pred
+        adv_pixel = torch.clamp(_to_pixel(adv_norm, mean_cpu, std_cpu), 0.0, 1.0)
+        adv_pixel_map[label] = adv_pixel
+        delta_vis_map[label] = _delta_signed_vis(adv_pixel - clean_pixel)
+
+    n_samples = int(clean_pixel.size(0))
+    n_cols = 1 + len(attack_labels)  # clean + each attack
+
+    adv_panels: List[torch.Tensor] = []
+    delta_panels: List[torch.Tensor] = []
+    zero_delta = torch.full_like(clean_pixel[0], 0.5)
+    for i in range(n_samples):
+        adv_panels.append(clean_pixel[i])
+        delta_panels.append(zero_delta)
+        for label in attack_labels:
+            adv_panels.append(adv_pixel_map[label][i])
+            delta_panels.append(delta_vis_map[label][i])
+
+    adv_stack = torch.stack(adv_panels, dim=0)
+    delta_stack = torch.stack(delta_panels, dim=0)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    adv_grid_path = out_dir / "compare_adv_pixel_side_by_side.png"
+    adv_annotated_path = out_dir / "compare_adv_pixel_side_by_side_annotated.png"
+    delta_grid_path = out_dir / "compare_delta_pixel_side_by_side.png"
+    save_image(make_grid(adv_stack, nrow=n_cols), adv_grid_path)
+    save_image(make_grid(delta_stack, nrow=n_cols), delta_grid_path)
+
+    # Annotated version: green/red border + truth/pred text per panel.
+    annotated_panels: List[torch.Tensor] = []
+    for i in range(n_samples):
+        y_true = int(labels_cpu[i].item())
+        for c in range(n_cols):
+            if c == 0:
+                img = clean_pixel[i]
+                pred = int(clean_pred[i].item())
+            else:
+                label = attack_labels[c - 1]
+                img = adv_pixel_map[label][i]
+                pred = int(adv_pred_map[label][i].item())
+
+            correct = pred == y_true
+            color = "green" if correct else "red"
+            text = f"y={y_true} p={pred}"
+
+            img_u8 = (img.clamp(0.0, 1.0) * 255.0).to(torch.uint8)
+            h, w = int(img_u8.size(1)), int(img_u8.size(2))
+            box = torch.tensor([[0, 0, max(w - 1, 1), max(h - 1, 1)]], dtype=torch.int64)
+            ann_u8 = draw_bounding_boxes(
+                img_u8,
+                boxes=box,
+                labels=[text],
+                colors=[color],
+                width=3,
+            )
+            annotated_panels.append(ann_u8.float() / 255.0)
+
+    annotated_stack = torch.stack(annotated_panels, dim=0)
+    save_image(make_grid(annotated_stack, nrow=n_cols), adv_annotated_path)
+
+    columns = ["clean"] + attack_labels
+    return {
+        "columns": columns,
+        "n_cols": n_cols,
+        "n_rows": n_samples,
+        "compare_adv_pixel_side_by_side": str(adv_grid_path),
+        "compare_adv_pixel_side_by_side_annotated": str(adv_annotated_path),
+        "compare_delta_pixel_side_by_side": str(delta_grid_path),
+    }
+
+
 def _run_attack_and_save(
     *,
     label: str,
@@ -276,7 +440,7 @@ def _run_attack_and_save(
     std_t: torch.Tensor,
     out_dir: Path,
     strict_eps: bool,
-) -> Dict[str, Any]:
+) -> Tuple[Dict[str, Any], torch.Tensor]:
     with torch.no_grad():
         clean_logits = model(images)
         clean_pred = clean_logits.argmax(dim=1)
@@ -349,7 +513,7 @@ def _run_attack_and_save(
         f"eps_ok={stats['eps_ok']}, clean_acc_batch={stats['clean_acc_batch']:.3f}, "
         f"adv_acc_batch={stats['adv_acc_batch']:.3f}"
     )
-    return stats
+    return stats, adv_norm.detach().cpu()
 
 
 def main() -> None:
@@ -381,9 +545,11 @@ def main() -> None:
     root_out.mkdir(parents=True, exist_ok=True)
 
     if args.all_attacks:
-        attack_map = _resolve_all_attacks(model, cfg, args.attack_source, args.fast)
+        attack_map = _resolve_all_attacks(model, cfg, args.attack_source, args.fast, train_domain=args.train_domain)
     else:
-        attack, eps_cfg, attack_name = _resolve_attack(model, cfg, args.attack_source, args.attack)
+        attack, eps_cfg, attack_name = _resolve_attack(
+            model, cfg, args.attack_source, args.attack, train_domain=args.train_domain
+        )
         single_label = "from_source" if args.attack == "from_source" else args.attack
         attack_map = {single_label: (attack, eps_cfg, attack_name)}
 
@@ -398,11 +564,12 @@ def main() -> None:
         "attacks": {},
         "failures": {},
     }
+    compare_adv_norm: Dict[str, torch.Tensor] = {}
 
     for label, (attack, eps_cfg, attack_name) in attack_map.items():
         out_dir = root_out / label if args.all_attacks else root_out
         try:
-            stats = _run_attack_and_save(
+            stats, adv_norm = _run_attack_and_save(
                 label=label,
                 attack_name=attack_name,
                 attack=attack,
@@ -416,11 +583,20 @@ def main() -> None:
                 strict_eps=bool(args.strict_eps),
             )
             summary["attacks"][label] = stats
+            compare_adv_norm[label] = adv_norm
         except Exception as exc:  # pragma: no cover - defensive path
             summary["failures"][label] = str(exc)
             print(f"[ERROR] {label}: {exc}")
             if not args.all_attacks:
                 raise
+
+    side_by_side = _save_side_by_side_comparison(images, labels, model, compare_adv_norm, mean_t, std_t, root_out)
+    if side_by_side:
+        summary["side_by_side"] = side_by_side
+        print(
+            f"[INFO] Side-by-side comparison saved: "
+            f"{side_by_side.get('compare_adv_pixel_side_by_side')}"
+        )
 
     with (root_out / "summary.json").open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import itertools
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable
 
 import torch
 
 from ardg.training.losses import compute_loss
+from ardg.utils.batch import unpack_xy
 
 
 class Evaluator:
@@ -41,16 +42,6 @@ class Evaluator:
             return
         yield from itertools.islice(self.loader, self.max_batches)
 
-    @staticmethod
-    def _as_tuple_batch(batch: Any) -> Tuple[torch.Tensor, torch.Tensor]:
-        if isinstance(batch, dict):
-            if "x" not in batch or "y" not in batch:
-                raise ValueError("Batch dict must contain 'x' and 'y'.")
-            return batch["x"], batch["y"]
-        if isinstance(batch, (list, tuple)) and len(batch) >= 2:
-            return batch[0], batch[1]
-        raise ValueError("Unsupported batch format; expected dict with x/y or (images, labels).")
-
     @torch.no_grad()
     def evaluate_clean(self) -> Dict[str, float]:
         """Evaluate accuracy/loss on clean inputs."""
@@ -59,7 +50,7 @@ class Evaluator:
         total_correct = 0
         total_seen = 0
         for batch in self._iter_batches():
-            images, labels = self._as_tuple_batch(batch)
+            images, labels = unpack_xy(batch)
             images = images.to(self.device)
             labels = labels.to(self.device)
             logits = self.model(images)
@@ -80,7 +71,7 @@ class Evaluator:
         total_correct = 0
         total_seen = 0
         for batch in self._iter_batches():
-            images, labels = self._as_tuple_batch(batch)
+            images, labels = unpack_xy(batch)
             images = images.to(self.device)
             labels = labels.to(self.device)
             adv = attack(images, labels).detach()

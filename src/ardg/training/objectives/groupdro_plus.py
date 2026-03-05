@@ -10,6 +10,7 @@ from ardg.training.cluster_utils import run_kmeans
 from ardg.training.losses import compute_loss
 from ardg.training.objectives.base import Objective
 from ardg.attacks.attack_suite import build_train_attack
+from ardg.utils.batch import unpack_xy
 
 
 class GroupDROPlus(Objective):
@@ -31,7 +32,7 @@ class GroupDROPlus(Objective):
             self.q = torch.ones(num_groups, device=device) / float(num_groups)
 
     def loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
-        images, labels = _unpack_batch(batch)
+        images, labels = unpack_xy(batch)
         if self.attack is not None:
             model.eval()
             images = self.attack(images, labels).detach()
@@ -74,9 +75,3 @@ class GroupDROPlus(Objective):
         for g in range(min(3, num_groups)):
             metrics[f"loss_g{g}"] = float(loss_g[g].item())
         return total_loss, metrics
-
-
-def _unpack_batch(batch: Any):
-    if isinstance(batch, dict):
-        return batch["x"], batch["y"]
-    return batch

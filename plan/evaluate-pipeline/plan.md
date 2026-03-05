@@ -29,29 +29,27 @@ Core goal: one consistent evaluation interface for all models/checkpoints using:
 2. Backward-compatible function wrappers still exist for old call sites.
 
 ### 3) Attack Suite Integration
-1. `src/ardg/attacks/attack_suite.py::build_eval_attacks` builds evaluation attacks from `attack.eval`.
-2. `scripts/evaluate.py` currently requires `pgd20` in eval suite.
-3. AutoAttack path is separate (`src/ardg/attacks/autoattack.py`) and controlled by `attack.autoattack.enabled`.
+1. `src/ardg/attacks/attack_suite.py::build_eval_suite` builds evaluation attacks from `attack.eval_suite`.
+2. Backward compatibility fallback still supports legacy `attack.eval + attack.autoattack`.
+3. AutoAttack is integrated through suite builder (`autoattack_ta` via TorchAttacks), not a separate eval path.
 
 ## Current Runtime Behavior
 1. Resolve checkpoint (`best.pt` then `last.pt`) unless explicit `--checkpoint`.
-2. Evaluate clean accuracy on each requested split.
-3. Evaluate PGD20 attack from eval suite.
-4. Optionally evaluate AutoAttack.
-5. Log `acc_clean`, `acc_pgd20`, optional `acc_aa`, and `worst_acc`.
+2. Evaluate clean accuracy on test split.
+3. Evaluate all configured attacks in `attack.eval_suite` (or legacy fallback).
+4. Log clean, per-attack metrics, and worst robust accuracy.
 
 ## What We Want Next (Target State)
-1. Multi-attack eval suite support beyond mandatory `pgd20` gate.
-2. Optional fixed-batch quick eval mode in `scripts/evaluate.py` for faster sanity checks.
-3. Unified JSON export schema for report ingestion.
-4. Strong consistency checks:
+1. Optional fixed-batch quick eval mode in `scripts/evaluate.py` for faster sanity checks.
+2. Unified JSON export schema for report ingestion.
+3. Strong consistency checks:
    - attack eps budget correctness
    - clean-vs-robust monotonicity expectations
    - deterministic split/eval protocol.
 
 ## Gaps and Risks
-1. `scripts/evaluate.py` hard-requires `pgd20`; this is strict but can block some configs.
-2. AutoAttack runtime can be expensive and may be skipped in practice.
+1. AutoAttack runtime can be expensive and may be skipped in practice.
+2. Some attacks can fail on specific checkpoints/settings, so robust logging of failures is required.
 3. No single script currently produces a full ablation-ready evaluation table directly.
 
 ## Evaluation Verification Scope
@@ -74,10 +72,9 @@ Use `plan/evaluate-pipeline/evidence/`:
 
 ## Pipeline Flow (Text)
 1. Config + checkpoint resolution.
-2. Build loaders (`val`, `test`).
+2. Build loader (test split).
 3. Build eval attacks from config.
-4. Per split:
+4. Run:
    - clean metrics via `Evaluator.evaluate_clean()`
    - attack metrics via `Evaluator.evaluate_suite(...)`
-   - optional AutoAttack.
 5. Log split metrics and system/runtime metadata.
