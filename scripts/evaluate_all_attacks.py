@@ -11,10 +11,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-import torch
-
 from ardg.attacks.attack_suite import build_attack
-from ardg.attacks.autoattack import run_autoattack
 from ardg.config import DEFAULT_CONFIG_PATH
 from ardg.evaluation.evaluator import Evaluator
 from ardg.experiments.common import build_loaders, load_model_from_checkpoint, setup_run
@@ -100,6 +97,19 @@ def _build_attack_specs(eps: float, alpha: float, *, fast: bool) -> List[Dict[st
     ]
 
 
+def _build_autoattack_spec(cfg: Dict[str, Any], default_eps: float) -> Dict[str, Any]:
+    aa_cfg = cfg.get("attack", {}).get("autoattack", {})
+    return {
+        "label": "autoattack",
+        "type": "autoattack",
+        "norm": str(aa_cfg.get("norm", "Linf")),
+        "eps": float(aa_cfg.get("eps", default_eps)),
+        "version": str(aa_cfg.get("version", "standard")),
+        "n_classes": int(cfg.get("model", {}).get("num_classes", 10)),
+        "verbose": bool(aa_cfg.get("verbose", False)),
+    }
+
+
 def main() -> None:
     args = parse_args()
     cfg, logger, run, device = setup_run(args.config, run_name_suffix="all_attacks_eval")
@@ -118,6 +128,8 @@ def main() -> None:
 
     dataset_name = str(cfg["dataset"]["name"])
     attack_specs = _build_attack_specs(eps, alpha, fast=bool(args.fast))
+    if not args.no_autoattack:
+        attack_specs.append(_build_autoattack_spec(cfg, eps))
     robust: Dict[str, Dict[str, float]] = {}
     failures: Dict[str, str] = {}
 
@@ -129,36 +141,18 @@ def main() -> None:
         spec_for_build["name"] = str(spec_for_build.get("type", "pgd"))
         try:
             attack = build_attack(spec_for_build, model, dataset_name=dataset_name)
+            attack_start = time.perf_counter()
             metrics = evaluator.evaluate_under_attack(attack)
+            metrics["runtime_sec"] = float(time.perf_counter() - attack_start)
             robust[label] = metrics
             print(
                 f"[ATTACK] {label}: acc={float(metrics['acc']):.6f} "
-                f"loss={float(metrics['loss']):.6f} n={int(metrics['n_samples'])}"
+                f"loss={float(metrics['loss']):.6f} n={int(metrics['n_samples'])} "
+                f"runtime={float(metrics['runtime_sec']):.2f}s"
             )
         except Exception as exc:
             failures[label] = str(exc)
             print(f"[ERROR] {label}: {exc}")
-
-    aa_metrics = None
-    if not args.no_autoattack:
-        aa_cfg = cfg.get("attack", {}).get("autoattack", {})
-        aa_norm = str(aa_cfg.get("norm", "Linf"))
-        aa_version = str(aa_cfg.get("version", "standard"))
-        aa_metrics = run_autoattack(
-            model,
-            loader,
-            eps=float(aa_cfg.get("eps", eps)),
-            device=device,
-            dataset_name=dataset_name,
-            norm=aa_norm,
-            version=aa_version,
-            max_batches=aa_cfg.get("max_batches", args.max_batches if args.max_batches > 0 else None),
-        )
-        robust["autoattack"] = aa_metrics
-        print(
-            f"[ATTACK] autoattack: acc={float(aa_metrics['acc']):.6f} "
-            f"n={int(aa_metrics['n_samples'])} runtime={float(aa_metrics.get('aa_runtime_sec', 0.0)):.2f}s"
-        )
 
     elapsed = time.perf_counter() - start
     worst_robust = min((float(v["acc"]) for v in robust.values()), default=float(clean["acc"]))

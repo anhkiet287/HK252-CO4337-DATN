@@ -49,7 +49,7 @@ attack:
     eps: 0.0313725
 logging:
   wandb:
-    enabled: true
+    enabled: false
     project: ardg
     entity: ''
   run_name: resnet18_colab_erm

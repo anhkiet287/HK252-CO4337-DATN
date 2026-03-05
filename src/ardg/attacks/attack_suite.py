@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
+from ardg.attacks.autoattack_ta import build_autoattack_attack
 from ardg.attacks.cw import build_cw_attack
 from ardg.attacks.deepfool import build_deepfool_attack
 from ardg.attacks.fab import build_fab_attack
@@ -38,6 +39,8 @@ def _build_attack_from_cfg(atk_cfg: Dict[str, Any], model: "nn.Module") -> Any:
         return build_square_attack(atk_cfg, model)
     if name == "fab":
         return build_fab_attack(atk_cfg, model)
+    if name == "autoattack":
+        return build_autoattack_attack(atk_cfg, model)
     raise ValueError(f"Unsupported attack name: {name}")
 
 
@@ -73,6 +76,7 @@ def build_attack(
         "fgsm_rs",
         "fab",
         "square",
+        "autoattack",
     }:
         norm_in = atk_cfg.get("norm")
         if norm_in is not None and str(norm_in).lower() != str(shared_norm).lower():

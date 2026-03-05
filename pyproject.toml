@@ -21,7 +21,6 @@ dependencies = [
 
 [project.optional-dependencies]
 wandb = ["wandb>=0.15"]
-autoattack = ["autoattack>=0.1"]
 dev = [
   "pytest>=7.0",
   "ruff>=0.1.0",

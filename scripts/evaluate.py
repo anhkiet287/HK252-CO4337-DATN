@@ -6,8 +6,7 @@ from pathlib import Path
 
 import torch
 
-from ardg.attacks.attack_suite import build_eval_attacks
-from ardg.attacks.autoattack import run_autoattack
+from ardg.attacks.attack_suite import build_attack, build_eval_attacks
 from ardg.config import DEFAULT_CONFIG_PATH
 from ardg.evaluation.evaluator import Evaluator
 from ardg.experiments.common import build_loaders, load_model_from_checkpoint, setup_run
@@ -86,7 +85,7 @@ def main() -> None:
     aa_eps = _resolve_aa_eps(cfg)
     aa_norm = str(aa_cfg.get("norm", "Linf"))
     aa_version = str(aa_cfg.get("version", "standard"))
-    aa_max_batches = aa_cfg.get("max_batches")
+    aa_max_batches = int(aa_cfg.get("max_batches", 0) or 0)
 
     step = 0
     start = time.perf_counter()
@@ -111,20 +110,24 @@ def main() -> None:
 
         acc_aa = None
         if aa_enabled:
-            aa = run_autoattack(
-                model,
-                loader,
-                aa_eps,
-                device,
-                dataset_name=cfg["dataset"]["name"],
-                norm=aa_norm,
-                version=aa_version,
-                max_batches=aa_max_batches,
-            )
+            aa_spec = {
+                "name": "autoattack",
+                "type": "autoattack",
+                "norm": aa_norm,
+                "eps": aa_eps,
+                "version": aa_version,
+                "n_classes": int(cfg.get("model", {}).get("num_classes", 10)),
+                "verbose": bool(aa_cfg.get("verbose", False)),
+            }
+            aa_attack = build_attack(aa_spec, model, dataset_name=cfg["dataset"]["name"])
+            aa_eval = Evaluator(model, loader, device=device, max_batches=aa_max_batches)
+            aa_start = time.perf_counter()
+            aa = aa_eval.evaluate_under_attack(aa_attack)
+            aa_runtime = time.perf_counter() - aa_start
             acc_aa = float(aa.get("acc", 0.0))
             if split_name == "test":
-                test_aa_runtime = float(aa.get("aa_runtime_sec", 0.0))
-                test_aa_samples = int(aa.get("aa_n_samples", aa.get("n_samples", 0)))
+                test_aa_runtime = float(aa_runtime)
+                test_aa_samples = int(aa.get("n_samples", 0))
 
         worst_acc = None
         if acc_pgd20 is not None and acc_aa is not None:
