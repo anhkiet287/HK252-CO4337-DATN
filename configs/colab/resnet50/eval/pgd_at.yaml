@@ -18,6 +18,9 @@ model:
 train:
   mode: pgd_at
 
+eval:
+  batch_size: 128
+
 attack:
   eval_suite:
     max_batches: 0

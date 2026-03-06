@@ -78,7 +78,17 @@ def get_dataloaders(cfg: dict) -> Tuple[Any, Any, Any]:
     """Build train/val/test dataloaders for supported datasets."""
     name = cfg["dataset"]["name"]
     data_dir = cfg["dataset"].get("data_dir", "data")
-    batch_size = cfg["train"]["batch_size"]
+    train_cfg = cfg.get("train", {})
+    eval_cfg = cfg.get("eval", {})
+    dataset_cfg = cfg.get("dataset", {})
+    batch_size = int(
+        train_cfg.get(
+            "batch_size",
+            eval_cfg.get("batch_size", dataset_cfg.get("batch_size", 128)),
+        )
+    )
+    if batch_size <= 0:
+        raise ValueError(f"Invalid batch size: {batch_size}. Must be >= 1.")
     num_workers = cfg["dataset"].get("num_workers", 0)
 
     split_path = ensure_split(cfg)
