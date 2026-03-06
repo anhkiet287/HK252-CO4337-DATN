@@ -6,7 +6,7 @@ experiment:
 
 dataset:
   name: cifar10
-  data_dir: /content/drive/MyDrive/ardg/data
+  data_dir: /content/ardg/data
   val_ratio: 0.02
   num_workers: 8
   augmentation: standard
@@ -107,4 +107,4 @@ logging:
     group_template: "{model}/{stage}"
     add_default_tags: true
   run_name: resnet50_colab_multi_attack_erm_all_domains_full
-  output_dir: /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs
+  output_dir: /content/HK252-CO4337-DATN/outputs
