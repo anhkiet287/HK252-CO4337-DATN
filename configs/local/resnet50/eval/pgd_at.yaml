@@ -1,0 +1,49 @@
+experiment:
+  seed: 42
+  device: cuda
+  precision: fp32
+  deterministic: true
+
+dataset:
+  name: cifar10
+  data_dir: data
+  val_ratio: 0.02
+  num_workers: 8
+  augmentation: standard
+
+model:
+  name: resnet50_cifar
+  num_classes: 10
+
+train:
+  mode: pgd_at
+
+attack:
+  eval_suite:
+    max_batches: 0
+    attacks:
+      - label: pgd20
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 20
+        restarts: 5
+        loss: ce
+        random_start: true
+      - label: autoattack
+        type: autoattack
+        norm: Linf
+        eps: 0.0313725
+        version: standard
+        n_classes: 10
+        verbose: false
+
+logging:
+  wandb:
+    enabled: true
+    project: ardg
+    entity: ''
+    group_template: "{model}/{stage}"
+    add_default_tags: true
+  run_name: resnet50_local_pgd_at
+  output_dir: outputs

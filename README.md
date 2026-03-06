@@ -19,6 +19,7 @@ Main idea of current codebase:
 - keep training objectives modular
 - use one evaluation entry point: `scripts/evaluate.py`
 - use one evaluation attack interface: `attack.eval_suite`
+- keep train/eval configs separated (`.../at|erm/...` for train, `.../eval/...` for eval)
 - keep experiments deterministic and comparable
 
 ## Execution Policy
@@ -60,6 +61,22 @@ Core modules:
 - Objectives: `src/ardg/training/objectives/`
 - Evaluator class: `src/ardg/evaluation/evaluator.py`
 - Attack factory/suites: `src/ardg/attacks/attack_suite.py`
+
+## Config Layout (Train vs Eval)
+
+For each model family, maintain separate configs:
+- Train configs: `configs/<platform>/<model_family>/train/*.yaml`
+- Eval configs: `configs/<platform>/<model_family>/eval/*.yaml`
+
+ResNet50 examples:
+- Train:
+  - `configs/colab/resnet50/train/erm.yaml`
+  - `configs/colab/resnet50/train/pgd_at.yaml`
+  - `configs/colab/resnet50/train/multi_attack_erm.yaml`
+- Eval:
+  - `configs/colab/resnet50/eval/erm.yaml`
+  - `configs/colab/resnet50/eval/pgd_at.yaml`
+  - `configs/colab/resnet50/eval/multi_attack_erm.yaml`
 
 ## Training
 
@@ -198,13 +215,13 @@ Use single-line `!python` commands.
 Example train:
 
 ```bash
-!python scripts/train.py --config configs/colab/resnet50/at/multi_attack_erm.yaml --verbose
+!python scripts/train.py --config configs/colab/resnet50/train/multi_attack_erm.yaml --verbose
 ```
 
 Example eval:
 
 ```bash
-!python scripts/evaluate.py --config configs/colab/resnet50/at/multi_attack_erm.yaml --checkpoint /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs/<RUN_NAME>/best.pt --deterministic --seed 42 --verbose
+!python scripts/evaluate.py --config configs/colab/resnet50/eval/multi_attack_erm.yaml --checkpoint /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs/<RUN_NAME>/best.pt --deterministic --seed 42 --verbose
 ```
 
 ## Minimal Maintenance Direction

@@ -20,7 +20,7 @@ python3 -m compileall -q src scripts
 ```bash
 # 1) Normalization
 PYTHONPATH=src python3 scripts/preflight_check.py \
-  --config configs/local/resnet50/at/multi_attack_erm.yaml --io_mode normalized \
+  --config configs/local/resnet50/train/multi_attack_erm.yaml --io_mode normalized \
   | tee plan/multi-attack-baseline/evidence/01_preflight/preflight_normalized.txt
 
 # 2) Smoke train log (used for checks 4 and 5)
@@ -30,7 +30,7 @@ PYTHONPATH=src python3 scripts/train.py \
 
 # 3) Attack space visualization
 PYTHONPATH=src python3 scripts/attack_visual_check.py \
-  --config configs/local/resnet50/at/multi_attack_erm.yaml \
+  --config configs/local/resnet50/train/multi_attack_erm.yaml \
   --checkpoint outputs/smoke_resnet50_local_multi_attack_erm/best.pt \
   --split val --attack-source train --attack from_source --num-samples 8 \
   --strict-eps --output-dir plan/multi-attack-baseline/evidence/02_attack_space
@@ -39,7 +39,7 @@ PYTHONPATH=src python3 scripts/attack_visual_check.py \
 PYTHONPATH=src python3 - <<'PY' > plan/multi-attack-baseline/evidence/03_split/split_sizes.txt
 from ardg.config import load_config
 from ardg.experiments.common import build_loaders
-cfg = load_config("configs/local/resnet50/at/multi_attack_erm.yaml")
+cfg = load_config("configs/local/resnet50/train/multi_attack_erm.yaml")
 tr, va, te = build_loaders(cfg)
 print({"train_batches": len(tr), "val_batches": len(va), "test_batches": len(te)})
 print({"train_samples": len(tr.dataset), "val_samples": len(va.dataset), "test_samples": len(te.dataset)})

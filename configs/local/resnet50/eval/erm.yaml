@@ -3,44 +3,22 @@ experiment:
   device: cuda
   precision: fp32
   deterministic: true
+
 dataset:
   name: cifar10
   data_dir: data
   val_ratio: 0.02
   num_workers: 8
   augmentation: standard
+
 model:
   name: resnet50_cifar
   num_classes: 10
+
 train:
-  mode: pgd_at
-  epochs: 100
-  batch_size: 128
-  log_interval: 50
-  early_stopping:
-    enabled: false
-  optimizer:
-    name: sgd
-    lr: 0.1
-    momentum: 0.9
-    weight_decay: 0.0005
-  scheduler:
-    name: cosine
-    t_max: 100
-    eta_min: 0.0
+  mode: erm
+
 attack:
-  train:
-    name: pgd
-    eps: 0.0313725
-    step_size: 0.007843
-    num_steps: 10
-    restarts: 1
-  val:
-    name: pgd
-    eps: 0.0313725
-    step_size: 0.007843
-    num_steps: 20
-    restarts: 5
   eval_suite:
     max_batches: 0
     attacks:
@@ -59,20 +37,13 @@ attack:
         version: standard
         n_classes: 10
         verbose: false
-val:
-  probe:
-    enabled: true
-    type: pgd
-    norm: Linf
-    eps: 0.0313725
-    steps: 20
-    alpha: 0.007843
-    restarts: 1
-    max_batches: 10
+
 logging:
   wandb:
     enabled: true
     project: ardg
     entity: ''
-  run_name: resnet50_local_pgd_at
+    group_template: "{model}/{stage}"
+    add_default_tags: true
+  run_name: resnet50_local_erm
   output_dir: outputs

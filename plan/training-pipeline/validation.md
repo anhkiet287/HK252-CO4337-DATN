@@ -19,7 +19,7 @@ python3 -m py_compile \
 ```bash
 # 1) Data/attack IO correctness
 PYTHONPATH=src python3 scripts/preflight_check.py \
-  --config configs/local/resnet50/at/multi_attack_erm.yaml --io_mode normalized \
+  --config configs/local/resnet50/train/multi_attack_erm.yaml --io_mode normalized \
   | tee plan/training-pipeline/evidence/01_data_io/preflight_multi_attack_normalized.txt
 
 # 2) PGD-AT smoke

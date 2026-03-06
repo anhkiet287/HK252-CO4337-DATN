@@ -56,8 +56,8 @@
   - `src/ardg/attacks/attack_suite.py`
   - `src/ardg/attacks/fgsm.py`
   - `src/ardg/attacks/pgd.py`
-  - `configs/local/resnet50/at/multi_attack_erm.yaml`
-  - `configs/colab/resnet50/at/multi_attack_erm.yaml`
+  - `configs/local/resnet50/train/multi_attack_erm.yaml`
+  - `configs/colab/resnet50/train/multi_attack_erm.yaml`
   - `configs/smoke_test/resnet50_local_multi_attack_erm_smoke.yaml`
 - Next steps:
   - Run end-to-end smoke and full train on target environment.
