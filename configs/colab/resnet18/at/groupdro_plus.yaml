@@ -8,7 +8,7 @@ dataset:
   data_dir: /content/drive/MyDrive/ardg/data
   val_ratio: 0.02
   num_workers: 8
-  augmentation: randaugment
+  augmentation: standard
 model:
   name: resnet18_cifar
   num_classes: 10

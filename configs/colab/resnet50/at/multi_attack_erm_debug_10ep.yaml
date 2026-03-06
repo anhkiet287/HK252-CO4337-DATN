@@ -30,7 +30,7 @@ train:
     checkpoint_tiebreakers: [worst_acc, clean_acc]
   optimizer:
     name: sgd
-    lr: 0.05
+    lr: 0.1
     momentum: 0.9
     weight_decay: 0.0005
   scheduler:

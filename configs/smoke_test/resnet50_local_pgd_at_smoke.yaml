@@ -10,7 +10,7 @@ dataset:
   data_dir: data
   val_ratio: 0.02
   num_workers: 4
-  augmentation: randaugment
+  augmentation: standard
   max_train_samples: 512
   max_val_samples: 128
   max_test_samples: 128

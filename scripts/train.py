@@ -36,6 +36,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional W&B run id to resume into (useful for legacy checkpoints).",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print resolved config summary before training starts.",
+    )
     return parser.parse_args()
 
 
@@ -101,6 +106,35 @@ def main() -> None:
         logger.warning(
             "Resuming from checkpoint without wandb run id. A new wandb run will be created."
         )
+
+    if args.verbose:
+        train_cfg = cfg.get("train", {})
+        ds_cfg = cfg.get("dataset", {})
+        model_cfg = cfg.get("model", {})
+        logger.info(
+            "Resolved run: mode=%s model=%s batch_size=%s epochs=%s device=%s deterministic=%s",
+            train_cfg.get("mode"),
+            model_cfg.get("name"),
+            train_cfg.get("batch_size"),
+            train_cfg.get("epochs"),
+            device,
+            cfg.get("experiment", {}).get("deterministic", True),
+        )
+        logger.info(
+            "Dataset: name=%s augmentation=%s num_workers=%s val_ratio=%s",
+            ds_cfg.get("name"),
+            ds_cfg.get("augmentation"),
+            ds_cfg.get("num_workers"),
+            ds_cfg.get("val_ratio"),
+        )
+        if train_cfg.get("mode") == "multi_attack_erm":
+            ma_cfg = train_cfg.get("multi_attack", {})
+            logger.info(
+                "Multi-attack: strategy=%s aggregation=%s include_clean=%s",
+                ma_cfg.get("strategy"),
+                ma_cfg.get("aggregation"),
+                ma_cfg.get("include_clean"),
+            )
 
     # Building data, model, and trainer components.
     train_loader, val_loader, _ = build_loaders(cfg)

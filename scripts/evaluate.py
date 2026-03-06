@@ -68,6 +68,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional output JSON path. Default: <run_dir>/eval_test_summary.json",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print resolved evaluation setup and attack suite details.",
+    )
     return parser.parse_args()
 
 
@@ -204,6 +209,10 @@ def main() -> None:
         f"num_workers={int(cfg.get('dataset', {}).get('num_workers', 0))}"
     )
     print(f"[INFO] max_test_samples={cfg.get('dataset', {}).get('max_test_samples', 'full')}")
+    if args.verbose:
+        print(f"[INFO] max_batches={max_batches}")
+        print(f"[INFO] eval_attacks={list(attacks.keys()) if attacks else []}")
+        print(f"[INFO] model={cfg.get('model', {}).get('name')} mode={cfg.get('train', {}).get('mode')}")
     for label, attack in attacks.items():
         try:
             attack_start = time.perf_counter()

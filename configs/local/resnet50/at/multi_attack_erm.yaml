@@ -9,7 +9,7 @@ dataset:
   data_dir: data
   val_ratio: 0.02
   num_workers: 8
-  augmentation: randaugment
+  augmentation: standard
 
 model:
   name: resnet50_cifar

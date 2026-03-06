@@ -30,7 +30,7 @@ train:
     checkpoint_tiebreakers: [worst_acc, clean_acc]
   optimizer:
     name: sgd
-    lr: 0.05
+    lr: 0.1
     momentum: 0.9
     weight_decay: 0.0005
   scheduler:
@@ -104,5 +104,7 @@ logging:
     enabled: true
     project: ardg
     entity: ""
+    group_template: "{model}/{stage}"
+    add_default_tags: true
   run_name: resnet50_colab_multi_attack_erm_all_domains_full
   output_dir: /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs

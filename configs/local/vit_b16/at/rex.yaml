@@ -8,7 +8,7 @@ dataset:
   data_dir: data
   val_ratio: 0.02
   num_workers: 8
-  augmentation: randaugment
+  augmentation: standard
 model:
   name: vit_b16_cifar
   num_classes: 10

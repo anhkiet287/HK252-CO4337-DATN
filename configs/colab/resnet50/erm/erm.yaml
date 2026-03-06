@@ -35,22 +35,40 @@ attack:
     step_size: 0.007843
     num_steps: 20
     restarts: 5
-  eval:
+  eval_suite:
+    max_batches: 0
+    attacks:
+      - label: pgd20
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 20
+        restarts: 5
+        loss: ce
+        random_start: true
+      - label: autoattack
+        type: autoattack
+        norm: Linf
+        eps: 0.0313725
+        version: standard
+        n_classes: 10
+        verbose: false
+val:
+  probe:
     enabled: true
-    pgd20:
-      eps: 0.0313725
-      step_size: 0.007843
-      num_steps: 20
-      restarts: 5
-  autoattack:
-    enabled: true
-    eps: 0.0313725
+    type: pgd
     norm: Linf
-    version: standard
+    eps: 0.0313725
+    steps: 20
+    alpha: 0.007843
+    restarts: 1
+    max_batches: 10
 logging:
   wandb:
     enabled: true
     project: ardg
     entity: ''
+    group_template: "{model}/{stage}"
+    add_default_tags: true
   run_name: resnet50_colab_erm
   output_dir: /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs
