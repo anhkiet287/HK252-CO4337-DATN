@@ -8,6 +8,9 @@ from typing import Any, Dict, Optional
 import torch
 from torch.utils.data import DataLoader
 
+from ardg.attacks.attack_suite import build_eval_suite
+from ardg.evaluation.evaluator import Evaluator
+from ardg.evaluation.summary import summarize_suite
 from ardg.training.losses import compute_loss
 from ardg.training.objectives import build_objective
 from ardg.training.objectives.multi_attack_erm import resolve_multi_attack_train_cfg
@@ -80,11 +83,20 @@ class Trainer:
 
         # build loss function 
         self.objective = build_objective(cfg, model)
+        self.val_suite = _build_val_suite(cfg, model)
+        self.val_evaluator = Evaluator(
+            model,
+            val_loader,
+            device=str(self.device),
+            attack_suite=self.val_suite,
+            max_batches=int(self.max_val_batches or 0),
+        )
         self.best_metric = float("-inf")
-        self.best_metric_name = "acc"
+        self.best_metric_name = "acc_clean"
         self.best_epoch = 0
         self.best_vector: Optional[tuple[float, ...]] = None
-        self.ckpt_eps = 1e-6
+        sel_cfg = cfg.get("train", {}).get("selection", {})
+        self.ckpt_eps = float(sel_cfg.get("eps", 1e-6))
         self.best_ckpt_path: Optional[str] = None
 
         # early stopping
@@ -130,18 +142,17 @@ class Trainer:
             train_metrics["device"] = str(self.device)
             log_metrics(self.logger, train_metrics, self.global_step, "train")
 
-            val_metrics = self.validate(epoch) # loss, acc
+            val_metrics = self.validate(epoch) # prefixed val metrics
             val_metrics["device"] = str(self.device)
             log_metrics(self.logger, val_metrics, self.global_step, "val")
-            val_acc = float(val_metrics.get("acc", 0.0)) # cache val acc for select best model 
-            train_mode = str(self.cfg.get("train", {}).get("mode", "")).lower()
-            ckpt_metric_name = "acc"
-            ckpt_metric = val_acc
-            ckpt_vector = (ckpt_metric,)
-            if train_mode in {"multi_attack_erm", "multi-attack-erm", "multi_attack"}:
-                ckpt_metric_name, ckpt_metric, ckpt_vector = self._select_multi_attack_checkpoint(
-                    val_metrics
-                )
+            val_pref = val_metrics.get("_prefixed", val_metrics)
+            val_acc = float(
+                val_pref.get("val/acc_clean", val_pref.get("val/acc_adv", val_pref.get("val/acc", 0.0)))
+            ) # cache val acc for select best model 
+            selection_names = _resolve_selection_names(self.cfg, val_pref)
+            ckpt_vector = tuple(float(val_pref.get(n, float("-inf"))) for n in selection_names)
+            ckpt_metric_name = selection_names[0] if selection_names else "acc_clean"
+            ckpt_metric = ckpt_vector[0] if ckpt_vector else val_acc
 
             try:
                 self.objective.on_epoch_end(epoch, {"train": self.train_loader, "val": self.val_loader})
@@ -159,10 +170,14 @@ class Trainer:
                     "best",
                     {
                         "epoch": epoch,
-                        "val_acc": val_acc,
+                        "val_acc_clean": val_acc,
                         "selection_metric": ckpt_metric,
                         "selection_metric_name": ckpt_metric_name,
-                        "val_loss": float(val_metrics.get("loss", 0.0)),
+                        "val_loss_clean": float(
+                            val_metrics.get("loss_clean", val_metrics.get("loss_adv", 0.0))
+                        ),
+                        "selection_names": selection_names,
+                        "selection_vector": ckpt_vector,
                     },
                     epoch,
                 )
@@ -181,10 +196,14 @@ class Trainer:
                 "last",
                 {
                     "epoch": epoch,
-                    "val_acc": val_acc,
+                    "val_acc_clean": val_acc,
                     "selection_metric": ckpt_metric,
                     "selection_metric_name": ckpt_metric_name,
-                    "val_loss": float(val_metrics.get("loss", 0.0)),
+                    "val_loss_clean": float(
+                        val_metrics.get("loss_clean", val_metrics.get("loss_adv", 0.0))
+                    ),
+                    "selection_names": selection_names,
+                    "selection_vector": ckpt_vector,
                 },
                 epoch,
             )
@@ -231,6 +250,12 @@ class Trainer:
                 for _ in range(resumed_epoch):
                     self.scheduler.step()
 
+        if isinstance(checkpoint.get("objective"), dict):
+            try:
+                self.objective.load_state_dict(checkpoint["objective"])
+            except Exception:
+                self.logger.warning("Failed to load objective state; continuing without it.")
+
         if checkpoint.get("global_step") is not None:
             self.global_step = int(checkpoint["global_step"])
         else:
@@ -260,11 +285,6 @@ class Trainer:
         if ckpt_run_id:
             self.wandb_run_id = str(ckpt_run_id)
 
-        run_dir = Path(get_run_dir(self.cfg))
-        best_path = run_dir / "best.pt"
-        if best_path.exists():
-            self.best_ckpt_path = str(best_path)
-
         self.start_epoch = max(1, resumed_epoch + 1)
         self.logger.info(
             "Resumed from %s (epoch=%s, next_epoch=%s, global_step=%s).",
@@ -279,53 +299,6 @@ class Trainer:
             "global_step": self.global_step,
             "wandb_run_id": self.wandb_run_id,
         }
-
-    def _select_multi_attack_checkpoint(
-        self, val_metrics: Dict[str, float]
-    ) -> tuple[str, float, tuple[float, ...]]:
-        cfg_ma = resolve_multi_attack_train_cfg(self.cfg)
-        probe_cfg = self.cfg.get("val", {}).get("probe", {})
-        probe_enabled = bool(probe_cfg.get("enabled", False))
-
-        primary_token = str(cfg_ma.get("checkpoint_metric", "")).strip().lower()
-        if not primary_token:
-            primary_token = "pgd20_probe_acc" if probe_enabled else "worst_acc"
-
-        primary_token = _normalize_ckpt_token(primary_token)
-        primary_name, primary_value = _resolve_ckpt_metric_value(primary_token, val_metrics)
-        if primary_name == "pgd20_probe_acc" and primary_value == float("-inf"):
-            primary_name, primary_value = _resolve_ckpt_metric_value("worst_acc", val_metrics)
-            if primary_value == float("-inf"):
-                primary_name, primary_value = _resolve_ckpt_metric_value("clean_acc", val_metrics)
-
-        raw_tiebreakers = cfg_ma.get("checkpoint_tiebreakers")
-        if isinstance(raw_tiebreakers, str):
-            tie_tokens = [
-                _normalize_ckpt_token(part.strip())
-                for part in raw_tiebreakers.split(",")
-                if part.strip()
-            ]
-        elif isinstance(raw_tiebreakers, list):
-            tie_tokens = [_normalize_ckpt_token(str(x)) for x in raw_tiebreakers]
-        else:
-            if primary_name == "pgd20_probe_acc":
-                tie_tokens = ["worst_acc", "clean_acc"]
-            else:
-                tie_tokens = ["avg_acc", "clean_acc"]
-
-        ordered_tokens = [primary_name]
-        for token in tie_tokens:
-            if token not in ordered_tokens:
-                ordered_tokens.append(token)
-
-        vector: list[float] = []
-        resolved_names: list[str] = []
-        for token in ordered_tokens:
-            name, value = _resolve_ckpt_metric_value(token, val_metrics)
-            resolved_names.append(name)
-            vector.append(value)
-
-        return resolved_names[0], vector[0], tuple(vector)
 
     @staticmethod
     def _is_better_checkpoint(
@@ -390,6 +363,7 @@ class Trainer:
         total_seen = 0
         domain_counts: Dict[str, float] = {}
         last_domain_name: str | None = None
+        loss_key, acc_key = self._train_metric_keys()
 
         for step_idx, batch in enumerate(self.train_loader, start=1):
             self.global_step += 1
@@ -406,9 +380,9 @@ class Trainer:
 
             if self.log_interval and step_idx % self.log_interval == 0:
                 batch_metrics = {
-                    "loss": metrics["loss"],
-                    "acc": metrics["acc"],
-                    "lr": metrics["lr"],
+                    loss_key: metrics["loss"],
+                    acc_key: metrics["acc"],
+                    "optim/lr": metrics["optim/lr"],
                 }
                 if "domain_name" in metrics:
                     batch_metrics["domain_name"] = metrics["domain_name"]
@@ -419,7 +393,7 @@ class Trainer:
         avg_loss = total_loss / max(total_seen, 1)
         acc = total_correct / max(total_seen, 1)
         current_lr = self.optimizer.param_groups[0]["lr"]
-        epoch_metrics: Dict[str, Any] = {"loss": avg_loss, "acc": acc, "lr": current_lr}
+        epoch_metrics: Dict[str, Any] = {loss_key: avg_loss, acc_key: acc, "optim/lr": current_lr}
         if last_domain_name is not None:
             epoch_metrics["domain_name"] = last_domain_name
         for name, count in domain_counts.items():
@@ -429,32 +403,27 @@ class Trainer:
     def validate(self, epoch: int) -> Dict[str, float]:
         """Run validation for one epoch."""
         del epoch
-        self.model.eval()
-        total_loss = 0.0
-        total_correct = 0
-        total_seen = 0
-        with torch.no_grad():
-            for step_idx, batch in enumerate(self.val_loader, start=1):
-                images, labels = unpack_xy(batch)
-                images = images.to(self.device)
-                labels = labels.to(self.device)
-                logits = self.model(images)
-                loss = compute_loss(logits, labels)
-                total_loss += loss.item() * images.size(0)
-                total_correct += (logits.argmax(dim=1) == labels).sum().item()
-                total_seen += images.size(0)
-                if self.max_val_batches and step_idx >= self.max_val_batches:
-                    break
-        metrics: Dict[str, float] = {
-            "loss": total_loss / max(total_seen, 1),
-            "acc": total_correct / max(total_seen, 1),
-        }
+        per_domain = {}
+        if self.val_suite:
+            per_domain.update(self.val_evaluator.evaluate_suite(self.val_suite))
+            # ensure clean present for comparability
+            per_domain.setdefault("clean", self.val_evaluator.evaluate_clean())
+        else:
+            per_domain["clean"] = self.val_evaluator.evaluate_clean()
+
+        summary = summarize_suite(per_domain, prefix="val")
+        metrics_prefixed = {k: v for k, v in summary.items() if k.startswith("val/")}
+        metrics: Dict[str, float] = metrics_prefixed.copy()
         try:
             extra = self.objective.validate(self.model, self.val_loader)
         except AttributeError:
             extra = {}
         if isinstance(extra, dict):
             metrics.update(extra)
+            metrics_prefixed.update({f"val/{k}" if not k.startswith("val/") else k: v for k, v in extra.items()})
+
+        # stash prefixed metrics for selection
+        metrics["_prefixed"] = metrics_prefixed
         return metrics
 
     def _train_step(self, batch: Any) -> Dict[str, Any]:
@@ -463,11 +432,11 @@ class Trainer:
         batch = self.objective.preprocess_batch(batch, self.model)
 
         self.optimizer.zero_grad(set_to_none=True)
-        loss, metrics = self.objective.loss(self.model, batch)
+        loss, metrics = self.objective.compute_loss(self.model, batch)
         loss.backward()
         self.optimizer.step()
 
-        metrics["lr"] = self.optimizer.param_groups[0]["lr"]
+        metrics["optim/lr"] = self.optimizer.param_groups[0]["lr"]
         return metrics
 
     def _save_checkpoint(self, name: str, metrics: Dict[str, Any], epoch: int | None) -> str:
@@ -480,7 +449,10 @@ class Trainer:
             "model": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "scheduler": self.scheduler.state_dict() if self.scheduler is not None else None,
+            "objective": self.objective.state_dict() if hasattr(self.objective, "state_dict") else {},
             "metrics": metrics,
+            "selection_names": selection_names if "selection_names" in metrics else None,
+            "selection_vector": metrics.get("selection_vector"),
             "epoch": epoch_value,
             "global_step": int(self.global_step),
             "best_metric": float(self.best_metric),
@@ -504,9 +476,60 @@ class Trainer:
             return min(full_steps, int(self.max_train_batches))
         return full_steps
 
+    def _train_metric_keys(self) -> tuple[str, str]:
+        mode = str(self.cfg.get("train", {}).get("mode", "")).lower()
+        if mode in {"erm", "clean"}:
+            return "loss_clean", "acc_clean"
+        return "loss_adv", "acc_adv"
+
 def _normalize_es_metric_key(metric: Any) -> str:
-    key = str(metric or "acc").strip().lower().replace("val/", "").replace("val_", "")
+    key = str(metric or "acc_clean").strip().lower().replace("val/", "").replace("val_", "")
+    if key == "acc":
+        return "acc_clean"
+    if key == "loss":
+        return "loss_clean"
     return key
+
+
+def _resolve_selection_names(cfg: Dict[str, Any], metrics: Dict[str, float]) -> list[str]:
+    """Choose a selection vector based on config (train.selection.vector) or available metrics (prefixed)."""
+    sel_cfg = cfg.get("train", {}).get("selection", {})
+    explicit = sel_cfg.get("vector")
+    if isinstance(explicit, (list, tuple)):
+        names = [str(x) for x in explicit]
+    elif isinstance(explicit, str) and explicit.strip():
+        names = [part.strip() for part in explicit.split(",") if part.strip()]
+    else:
+        names = []
+
+    if names:
+        return names
+
+    # default heuristic
+    if "val/acc_worst" in metrics and "val/acc_avg" in metrics:
+        names = ["val/acc_worst", "val/acc_avg"]
+        if "val/acc_clean" in metrics:
+            names.append("val/acc_clean")
+        return names
+    if "val/acc_clean" in metrics:
+        return ["val/acc_clean"]
+    if "acc_worst" in metrics and "acc_avg" in metrics:
+        names = ["acc_worst", "acc_avg"]
+        if "acc_clean" in metrics:
+            names.append("acc_clean")
+        return names
+    if "acc_clean" in metrics:
+        return ["acc_clean"]
+    if "acc" in metrics:
+        return ["acc"]
+    # fallback: first numeric key
+    for key, val in metrics.items():
+        try:
+            float(val)
+            return [key]
+        except Exception:
+            continue
+    return []
 
 
 def _normalize_ckpt_token(token: str) -> str:
@@ -528,6 +551,10 @@ def _normalize_ckpt_token(token: str) -> str:
 
 
 def _resolve_ckpt_metric_value(token: str, metrics: Dict[str, float]) -> tuple[str, float]:
+    # accept prefixed tokens
+    if token.startswith("val/"):
+        name, value = _resolve_ckpt_metric_value(token.replace("val/", ""), {k.replace("val/",""):v for k,v in metrics.items()})
+        return f"val/{name}", value
     if token == "pgd20_probe_acc":
         return "pgd20_probe_acc", float(metrics.get("pgd20_probe_acc", float("-inf")))
     if token == "worst_acc":
@@ -541,3 +568,39 @@ def _resolve_ckpt_metric_value(token: str, metrics: Dict[str, float]) -> tuple[s
         return "clean_acc", float(value)
     # Fallback: direct metric key in val_metrics
     return token, float(metrics.get(token, float("-inf")))
+
+
+def _build_val_suite(cfg: Dict[str, Any], model: Any) -> Dict[str, Any]:
+    attack_cfg = cfg.get("attack", {})
+    val_specs = attack_cfg.get("val_suite") or attack_cfg.get("val") or None
+    # Backward compatibility: if no val suite, optionally reuse eval suite for validation
+    if val_specs is None:
+        val_specs = attack_cfg.get("eval_suite")
+    if not val_specs:
+        # Provide a minimal default suite: clean + pgd20 using shared eps if present
+        shared_eps = (
+            attack_cfg.get("eps")
+            or attack_cfg.get("step_size")
+            or attack_cfg.get("epsilon")
+            or 8.0 / 255.0
+        )
+        step_size = attack_cfg.get("step_size") or (shared_eps / 4.0)
+        val_specs = [
+            {"label": "clean", "type": "clean"},
+            {
+                "label": "pgd20",
+                "type": "pgd",
+                "eps": float(shared_eps),
+                "step_size": float(step_size),
+                "num_steps": 20,
+                "restarts": 1,
+                "loss": "ce",
+                "random_start": True,
+            },
+        ]
+    # reuse eval suite builder by temporarily injecting specs
+    tmp_cfg = dict(cfg)
+    tmp_attack = dict(attack_cfg)
+    tmp_attack["eval_suite"] = val_specs
+    tmp_cfg["attack"] = tmp_attack
+    return build_eval_suite(tmp_cfg, model)

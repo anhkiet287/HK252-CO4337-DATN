@@ -13,8 +13,8 @@
    - `erm` / `pgd_at` / `multi_attack_erm` / `rex` / `groupdro` / `groupdro_plus`
 6. Create trainer.
 7. For each epoch:
-   - `train_one_epoch()`
-   - `validate()`
+   - `train_one_epoch()` -> logs `train/loss_{clean|adv}`, `train/acc_{clean|adv}`, `optim/lr`
+   - `validate()` -> uses Evaluator + `summarize_suite` (uses `attack.val_suite` when present; defaults to clean+pgd20) → prefixed `val/*` (+ objective extras)
    - choose/save best checkpoint by selection metric
    - save last checkpoint
    - scheduler step
@@ -26,6 +26,7 @@ Implementation in repo:
 - Model construction: `src/ardg/models/factory.py` (`build_model`)
 - Objective dispatch: `src/ardg/training/objectives/__init__.py` (`build_objective`)
 - Training loop entry: `src/ardg/training/trainer.py` (`Trainer.train`)
+- Validation summarizer: `src/ardg/evaluation/evaluator.py` + `src/ardg/evaluation/summary.py`
 
 ## 2) Mid Level (Trainer Loop)
 
@@ -35,14 +36,12 @@ train():
 
   for epoch in [start_epoch .. epochs]:
     train_metrics = train_one_epoch(epoch)
-    val_metrics = validate(epoch)
+    val_metrics = validate(epoch)  # returns prefixed val metrics + _prefixed stash
 
-    if mode == "multi_attack_erm":
-      metric_name, metric_value, metric_vector = select_multi_attack_checkpoint(val_metrics)
-    else:
-      metric_name = "acc"
-      metric_value = val_metrics["acc"]
-      metric_vector = (metric_value,)
+    selection_names = resolve_selection_vector(cfg, val_metrics_prefixed)
+    metric_name = selection_names[0]
+    metric_vector = tuple(val_metrics_prefixed[name] for name in selection_names)
+    metric_value = metric_vector[0]
 
     if is_better(metric_vector, best_vector, eps=1e-6):
       best_vector = metric_vector
@@ -66,7 +65,6 @@ Implementation in repo:
   - `Trainer.train`
   - `Trainer.train_one_epoch`
   - `Trainer.validate`
-  - `Trainer._select_multi_attack_checkpoint`
   - `Trainer._is_better_checkpoint`
   - `Trainer._save_checkpoint`
 
@@ -82,13 +80,13 @@ _train_step(batch):
   loss.backward()
   optimizer.step()
 
-  metrics["lr"] = optimizer.lr
+  metrics["optim/lr"] = optimizer.lr
   return metrics
 ```
 
 Implementation in repo:
 - Train step: `src/ardg/training/trainer.py` (`Trainer._train_step`)
-- Objective hooks contract: `src/ardg/training/objectives/base.py` (`Objective.preprocess_batch`, `Objective.loss`)
+- Objective hooks contract: `src/ardg/training/objectives/base.py` (`preprocess_batch`, `compute_loss`, `state_dict`, `load_state_dict`)
 
 ## 4) Objective Logic by Mode
 
@@ -96,6 +94,7 @@ Implementation in repo:
 ```text
 preprocess_batch: no-op
 loss: CE(model(x), y)
+metrics: loss/acc + loss_clean/acc_clean
 ```
 Implementation in repo:
 - `src/ardg/training/objectives/erm.py` (`ERM`)
@@ -104,6 +103,7 @@ Implementation in repo:
 ```text
 preprocess_batch: x_adv = PGD(model, x, y)
 loss: CE(model(x_adv), y)
+metrics: loss/acc + loss_adv/acc_adv
 ```
 Implementation in repo:
 - `src/ardg/training/objectives/pgd_at.py` (`PGDAT`)
@@ -126,12 +126,10 @@ loss:
     mean CE across all domain batches
 
 validate:
-  compute per-domain val metrics:
-    val/acc_<domain>, val/loss_<domain>
-  compute aggregates:
-    val/acc_avg, val/acc_worst, val/worst_domain, val/acc_clean
+  (current code: clean-only via Evaluator)
   optional probe:
-    val/pgd20_probe_acc, val/pgd20_probe_loss
+    val/pgd20_probe_acc, val/pgd20_probe_loss (objective hook)
+metrics: loss/acc + loss_adv/acc_adv (+ per-domain acc_{name})
 ```
 Implementation in repo:
 - `src/ardg/training/objectives/multi_attack_erm.py` (`MultiAttackERM`)
@@ -148,6 +146,7 @@ loss:
     q_g <- q_g * exp(eta * loss_g)
     normalize q
   total_loss = sum(q_g * loss_g)
+metrics: loss/acc + loss_clean/acc_clean (or _adv if attack enabled)
 ```
 Implementation in repo:
 - `src/ardg/training/objectives/groupdro.py` (`GroupDRO`)
@@ -166,6 +165,7 @@ loss:
   group_weighted = sum(q_g * loss_g)
   reg = mean( CE(logits, y) * (q[cluster_ids] ^ gamma) )
   total_loss = group_weighted + lambda_reg * reg
+metrics: loss/acc + loss_clean/acc_clean (or _adv)
 ```
 Implementation in repo:
 - `src/ardg/training/objectives/groupdro_plus.py` (`GroupDROPlus`)
@@ -176,24 +176,13 @@ Implementation in repo:
 ```text
 input: val_metrics
 
-primary = train.multi_attack.checkpoint_metric
-tiebreakers = train.multi_attack.checkpoint_tiebreakers
-
-defaults:
-  if probe enabled and primary missing:
-    primary = pgd20_probe_acc
-  else if primary missing:
-    primary = worst_acc
-
-vector = [primary_value, tie_1_value, tie_2_value, ...]
-
-is_better:
-  lexicographic compare(candidate_vector, best_vector, eps=1e-6)
+selection_names = train.selection.vector or ["val/acc_worst","val/acc_avg","val/acc_clean"]
+vector = [val_metrics_prefixed[name] for name in selection_names]
+is_better: lexicographic compare(candidate_vector, best_vector, eps=1e-6)
 ```
 
 Implementation in repo:
-- Multi-attack metric vector selection: `src/ardg/training/trainer.py` (`Trainer._select_multi_attack_checkpoint`)
-- Comparator + epsilon policy: `src/ardg/training/trainer.py` (`Trainer._is_better_checkpoint`)
+- Selection vector (config/default) + comparator: `src/ardg/training/trainer.py` (`resolve_selection_vector`, `_is_better_checkpoint`)
 
 # Evaluation Pipeline Pseudocode (High -> Low Level)
 
@@ -255,7 +244,7 @@ evaluate_main():
     except Exception as e:
       failures[label] = str(e)
 
-  worst_robust_acc = min(robust[*].acc, default=clean_metrics.acc)
+  worst_robust_acc = min(robust[*].acc_adv, default=clean_metrics.acc_clean)
   log test metrics + system metrics
   save payload JSON
 ```
@@ -279,7 +268,7 @@ evaluate_clean():
     logits = model(x)
     loss = CE(logits, y)
     accumulate loss_sum, correct_sum, n
-  return {loss=loss_sum/n, acc=correct_sum/n, n_samples=n}
+  return {loss_clean=loss_sum/n, acc_clean=correct_sum/n, n_samples=n}
 ```
 
 ```text
@@ -291,7 +280,7 @@ evaluate_under_attack(attack):
     logits = model(x_adv)
     loss = CE(logits, y)
     accumulate loss_sum, correct_sum, n
-  return {loss=loss_sum/n, acc=correct_sum/n, n_samples=n}
+  return {loss_adv=loss_sum/n, acc_adv=correct_sum/n, n_samples=n}
 ```
 
 Implementation in repo:

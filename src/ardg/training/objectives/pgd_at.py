@@ -31,7 +31,7 @@ class PGDAT(Objective):
             return new_batch
         return adv, labels
 
-    def loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
+    def compute_loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
         images, labels = unpack_xy(batch)
         logits = model(images)
         loss = compute_loss(logits, labels)
@@ -39,6 +39,8 @@ class PGDAT(Objective):
         metrics = {
             "loss": float(loss.item()),
             "acc": correct / max(labels.size(0), 1),
+            "loss_adv": float(loss.item()),
+            "acc_adv": correct / max(labels.size(0), 1),
             "correct": correct,
             "batch_size": labels.size(0),
         }

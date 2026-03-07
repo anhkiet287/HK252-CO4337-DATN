@@ -251,7 +251,7 @@ class MultiAttackERM(Objective):
 
         raise ValueError(f"Unsupported strategy: {self.strategy}")
 
-    def loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, Any]]:
+    def compute_loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, Any]]:
         data = as_xy_dict(batch)
         labels = data["y"]
         batch_size = int(labels.size(0))
@@ -277,6 +277,8 @@ class MultiAttackERM(Objective):
                 {
                     "loss": float(loss.item()),
                     "acc": acc,
+                    "loss_adv": float(loss.item()),
+                    "acc_adv": acc,
                     "correct": acc * batch_size,
                 }
             )
@@ -290,6 +292,8 @@ class MultiAttackERM(Objective):
             {
                 "loss": float(loss.item()),
                 "acc": correct / max(batch_size, 1),
+                "loss_adv": float(loss.item()),
+                "acc_adv": correct / max(batch_size, 1),
                 "correct": correct,
             }
         )

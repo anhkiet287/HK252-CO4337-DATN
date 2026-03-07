@@ -37,7 +37,7 @@ class REx(Objective):
             return newb
         return adv, labels
 
-    def loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
+    def compute_loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
         images, labels = unpack_xy(batch)
         logits = model(images)
         base_loss = compute_loss(logits, labels)
@@ -64,6 +64,8 @@ class REx(Objective):
         metrics = {
             "loss": float(loss.item()),
             "acc": correct / max(labels.size(0), 1),
+            "loss_adv" if self.attack else "loss_clean": float(loss.item()),
+            "acc_adv" if self.attack else "acc_clean": correct / max(labels.size(0), 1),
             "rex_penalty": float(penalty.item()),
             "correct": correct,
             "batch_size": labels.size(0),

@@ -19,6 +19,9 @@ train:
   log_interval: 50
   early_stopping:
     enabled: false
+  selection:
+    vector: ["val/acc_worst", "val/acc_avg", "val/acc_clean"]
+    eps: 1e-6
   optimizer:
     name: sgd
     lr: 0.1
@@ -29,18 +32,40 @@ train:
     t_max: 100
     eta_min: 0.0
 attack:
-  train:
-    name: pgd
-    eps: 0.0313725
-    step_size: 0.007843
-    num_steps: 10
-    restarts: 1
-  val:
-    name: pgd
-    eps: 0.0313725
-    step_size: 0.007843
-    num_steps: 20
-    restarts: 5
+  train_domains:
+    - label: train_pgd
+      type: pgd
+      eps: 0.0313725
+      step_size: 0.007843
+      num_steps: 10
+      restarts: 1
+      loss: ce
+      random_start: true
+  val_suite:
+    attacks:
+      - label: clean
+        type: clean
+      - label: pgd20
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 20
+        restarts: 5
+        loss: ce
+        random_start: true
+  eval_suite:
+    max_batches: 0
+    attacks:
+      - label: clean
+        type: clean
+      - label: pgd20
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 20
+        restarts: 5
+        loss: ce
+        random_start: true
 val:
   probe:
     enabled: true

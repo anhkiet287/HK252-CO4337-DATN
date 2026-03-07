@@ -193,10 +193,16 @@ def _legacy_eval_specs(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def build_train_suite(cfg: Dict[str, Any], model: "nn.Module") -> Dict[str, Any]:
-    """Build train-time attack suite from attack.train_suite or attack.train."""
+    """Build train-time attack suite from attack.train_domains/train_suite/train."""
     model.eval()
     attack_cfg = cfg.get("attack", {})
     dataset_name = str(cfg["dataset"]["name"])
+
+    # New preferred config: attack.train_domains
+    train_domains = attack_cfg.get("train_domains")
+    if isinstance(train_domains, list) and train_domains:
+        specs = _coerce_suite_specs(train_domains)
+        return _build_suite_from_specs(specs, model, dataset_name, default_label_prefix="train")
 
     if "train_suite" in attack_cfg:
         train_suite_cfg = attack_cfg.get("train_suite")
@@ -221,7 +227,7 @@ def build_train_attack(cfg: Dict[str, Any], model: "nn.Module") -> Any:
     """
     suite = build_train_suite(cfg, model)
     if not suite:
-        raise ValueError("No train attack configured. Set attack.train or attack.train_suite.")
+        raise ValueError("No train attack configured. Set attack.train_domains, attack.train, or attack.train_suite.")
     if len(suite) != 1:
         keys = list(suite.keys())
         raise ValueError(

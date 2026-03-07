@@ -31,7 +31,7 @@ class GroupDROPlus(Objective):
         if self.q is None or self.q.numel() != num_groups:
             self.q = torch.ones(num_groups, device=device) / float(num_groups)
 
-    def loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
+    def compute_loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
         images, labels = unpack_xy(batch)
         if self.attack is not None:
             model.eval()
@@ -63,9 +63,12 @@ class GroupDROPlus(Objective):
         total_loss = group_weighted + self.lambda_reg * reg
 
         correct = (logits.argmax(dim=1) == labels).sum().item()
+        is_adv = self.attack is not None
         metrics = {
             "loss": float(total_loss.item()),
             "acc": correct / max(labels.size(0), 1),
+            ("loss_adv" if is_adv else "loss_clean"): float(total_loss.item()),
+            ("acc_adv" if is_adv else "acc_clean"): correct / max(labels.size(0), 1),
             "correct": correct,
             "batch_size": labels.size(0),
             "q_max": float(self.q.max().item()),
@@ -75,3 +78,11 @@ class GroupDROPlus(Objective):
         for g in range(min(3, num_groups)):
             metrics[f"loss_g{g}"] = float(loss_g[g].item())
         return total_loss, metrics
+
+    def state_dict(self) -> Dict[str, Any]:
+        return {"q": self.q} if self.q is not None else {}
+
+    def load_state_dict(self, state: Dict[str, Any]) -> None:
+        q = state.get("q")
+        if q is not None:
+            self.q = q

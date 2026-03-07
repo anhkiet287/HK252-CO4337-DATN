@@ -212,17 +212,23 @@ logging:
 
 Use single-line `!python` commands.
 
-Example train:
+### Train (Colab, ResNet50)
+- ERM: `!python scripts/train.py --config configs/colab/resnet50/train/erm.yaml --verbose`
+- PGD-AT: `!python scripts/train.py --config configs/colab/resnet50/train/pgd_at.yaml --verbose`
+- Multi-Attack ERM: `!python scripts/train.py --config configs/colab/resnet50/train/multi_attack_erm.yaml --verbose`
 
-```bash
-!python scripts/train.py --config configs/colab/resnet50/train/multi_attack_erm.yaml --verbose
-```
+### Evaluate (Colab, unified eval suite)
+Use `attack.eval_suite` configs to keep fairness; point to your checkpoint under `/content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs/<RUN_NAME>/best.pt`.
+- ERM/PGD-AT/Multi-Attack (all attacks):  
+  `!python scripts/evaluate.py --config configs/colab/resnet50/eval/all_attacks.yaml --checkpoint /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs/<RUN_NAME>/best.pt --deterministic --seed 42 --verbose`
+- Smoke (1 sample): add `--smoke-one-sample`
 
-Example eval:
+### Train (Local)
+- Activate env then:  
+  `PYTHONPATH=src python3 scripts/train.py --config configs/colab/resnet50/train/pgd_at.yaml --verbose`
 
-```bash
-!python scripts/evaluate.py --config configs/colab/resnet50/eval/multi_attack_erm.yaml --checkpoint /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs/<RUN_NAME>/best.pt --deterministic --seed 42 --verbose
-```
+### Evaluate (Local)
+- `PYTHONPATH=src python3 scripts/evaluate.py --config configs/colab/resnet50/eval/all_attacks.yaml --checkpoint outputs/<RUN_NAME>/best.pt --deterministic --seed 42 --verbose`
 
 ## Minimal Maintenance Direction
 
