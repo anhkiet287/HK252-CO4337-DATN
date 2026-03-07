@@ -20,6 +20,13 @@
    - scheduler step
 8. Finish and return checkpoint paths (`best.pt`, `last.pt`).
 
+Implementation in repo:
+- CLI + orchestration: `scripts/train.py:main`
+- Run setup / dataloaders: `src/ardg/experiments/common.py` (`setup_run`, `build_loaders`)
+- Model construction: `src/ardg/models/factory.py` (`build_model`)
+- Objective dispatch: `src/ardg/training/objectives/__init__.py` (`build_objective`)
+- Training loop entry: `src/ardg/training/trainer.py` (`Trainer.train`)
+
 ## 2) Mid Level (Trainer Loop)
 
 ```text
@@ -54,6 +61,15 @@ train():
     scheduler.step()
 ```
 
+Implementation in repo:
+- `src/ardg/training/trainer.py`:
+  - `Trainer.train`
+  - `Trainer.train_one_epoch`
+  - `Trainer.validate`
+  - `Trainer._select_multi_attack_checkpoint`
+  - `Trainer._is_better_checkpoint`
+  - `Trainer._save_checkpoint`
+
 ## 3) Low Level (Single Train Step)
 
 ```text
@@ -70,6 +86,10 @@ _train_step(batch):
   return metrics
 ```
 
+Implementation in repo:
+- Train step: `src/ardg/training/trainer.py` (`Trainer._train_step`)
+- Objective hooks contract: `src/ardg/training/objectives/base.py` (`Objective.preprocess_batch`, `Objective.loss`)
+
 ## 4) Objective Logic by Mode
 
 ### ERM
@@ -77,12 +97,17 @@ _train_step(batch):
 preprocess_batch: no-op
 loss: CE(model(x), y)
 ```
+Implementation in repo:
+- `src/ardg/training/objectives/erm.py` (`ERM`)
 
 ### PGD-AT
 ```text
 preprocess_batch: x_adv = PGD(model, x, y)
 loss: CE(model(x_adv), y)
 ```
+Implementation in repo:
+- `src/ardg/training/objectives/pgd_at.py` (`PGDAT`)
+- Attack builder used by objective: `src/ardg/attacks/attack_suite.py` (`build_train_attack`)
 
 ### Multi-Attack ERM
 ```text
@@ -108,6 +133,9 @@ validate:
   optional probe:
     val/pgd20_probe_acc, val/pgd20_probe_loss
 ```
+Implementation in repo:
+- `src/ardg/training/objectives/multi_attack_erm.py` (`MultiAttackERM`)
+- Train-domain attack construction: `src/ardg/attacks/attack_suite.py` (`build_attack`)
 
 ### GroupDRO
 ```text
@@ -121,6 +149,27 @@ loss:
     normalize q
   total_loss = sum(q_g * loss_g)
 ```
+Implementation in repo:
+- `src/ardg/training/objectives/groupdro.py` (`GroupDRO`)
+
+### GroupDRO++
+```text
+preprocess_batch:
+  optional adversarial preprocessing if enabled
+
+loss:
+  run batch-wise clustering on model features/logits -> cluster_ids
+  compute loss per discovered cluster: loss_g
+  update q over observed clusters:
+    q_g <- q_g * exp(eta * loss_g)
+    normalize q
+  group_weighted = sum(q_g * loss_g)
+  reg = mean( CE(logits, y) * (q[cluster_ids] ^ gamma) )
+  total_loss = group_weighted + lambda_reg * reg
+```
+Implementation in repo:
+- `src/ardg/training/objectives/groupdro_plus.py` (`GroupDROPlus`)
+- Cluster utility used by mode: `src/ardg/training/cluster_utils.py`
 
 ## 5) Checkpoint Selection (Multi-Attack)
 
@@ -141,6 +190,10 @@ vector = [primary_value, tie_1_value, tie_2_value, ...]
 is_better:
   lexicographic compare(candidate_vector, best_vector, eps=1e-6)
 ```
+
+Implementation in repo:
+- Multi-attack metric vector selection: `src/ardg/training/trainer.py` (`Trainer._select_multi_attack_checkpoint`)
+- Comparator + epsilon policy: `src/ardg/training/trainer.py` (`Trainer._is_better_checkpoint`)
 
 # Evaluation Pipeline Pseudocode (High -> Low Level)
 
@@ -164,6 +217,12 @@ is_better:
 10. Run adversarial evaluation for each attack in suite.
 11. Aggregate summary metrics and log to console + wandb.
 12. Save JSON report (`eval_test_summary.json` or `--save-json`).
+
+Implementation in repo:
+- CLI + orchestration: `scripts/evaluate.py:main`
+- Run setup / loaders / checkpoint model load: `src/ardg/experiments/common.py`
+- Attack suite resolution: `src/ardg/attacks/attack_suite.py` (`build_eval_suite`)
+- Evaluator runtime: `src/ardg/evaluation/evaluator.py` (`Evaluator`)
 
 ## 2) Mid Level (Evaluate Main Loop)
 
@@ -201,6 +260,15 @@ evaluate_main():
   save payload JSON
 ```
 
+Implementation in repo:
+- `scripts/evaluate.py`:
+  - `main`
+  - `_resolve_checkpoint`
+  - `_resolve_max_batches`
+  - `_resolve_eval_seed`
+  - `_resolve_eval_deterministic`
+  - `_log_attack_comparison_chart`
+
 ## 3) Low Level (Evaluator Core)
 
 ```text
@@ -226,6 +294,12 @@ evaluate_under_attack(attack):
   return {loss=loss_sum/n, acc=correct_sum/n, n_samples=n}
 ```
 
+Implementation in repo:
+- `src/ardg/evaluation/evaluator.py`:
+  - `Evaluator.evaluate_clean`
+  - `Evaluator.evaluate_under_attack`
+  - `Evaluator.evaluate_suite`
+
 ## 4) Attack Suite Resolution
 
 ```text
@@ -243,6 +317,17 @@ build_eval_suite(cfg, model):
   return dict[label -> callable]
 ```
 
+Implementation in repo:
+- Suite parser/builders: `src/ardg/attacks/attack_suite.py`
+- Concrete attack wrappers:
+  - `src/ardg/attacks/fgsm.py`
+  - `src/ardg/attacks/pgd.py`
+  - `src/ardg/attacks/cw.py`
+  - `src/ardg/attacks/deepfool.py`
+  - `src/ardg/attacks/fab.py`
+  - `src/ardg/attacks/square.py`
+  - `src/ardg/attacks/autoattack_ta.py`
+
 ## 5) Determinism + Fairness Checklist
 
 ```text
@@ -253,6 +338,11 @@ Must keep fixed across model comparisons:
   - max_batches / max_test_samples
   - threat model params (eps, norm, steps, restarts)
 ```
+
+Implementation in repo:
+- Seed/determinism utility: `src/ardg/utils/seed.py` (`set_seed`)
+- Eval deterministic overrides: `scripts/evaluate.py`
+- Train deterministic setup: `src/ardg/experiments/common.py` (`setup_run`)
 
 ## 6) Evaluation Outputs
 
@@ -272,3 +362,7 @@ JSON payload:
     max_batches, clean, robust, failures, runtime_sec, worst_robust_acc
   }
 ```
+
+Implementation in repo:
+- Console printing + JSON write: `scripts/evaluate.py`
+- Structured metric logging: `src/ardg/utils/logging.py` (`log_metrics`)
