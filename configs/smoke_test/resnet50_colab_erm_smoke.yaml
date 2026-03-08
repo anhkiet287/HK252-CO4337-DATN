@@ -20,7 +20,7 @@ model:
   num_classes: 10
 
 train:
-  mode: pgd_at
+  mode: erm
   epochs: 2
   batch_size: 64
   max_batches: 8
@@ -39,14 +39,6 @@ train:
     eta_min: 0.0
 
 attack:
-  train_domains:
-    - label: pgd_train
-      type: pgd
-      eps: 0.0313725
-      step_size: 0.007843
-      num_steps: 2
-      restarts: 1
-      random_start: true
   val_suite:
     - label: clean
       type: clean
@@ -65,4 +57,4 @@ logging:
     enabled: false
     project: ardg
     entity: ""
-  run_name: smoke_resnet50_colab_pgd_at
+  run_name: smoke_resnet50_colab_erm

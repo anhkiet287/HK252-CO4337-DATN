@@ -1,5 +1,5 @@
 experiment:
-  platform: colab
+  platform: local
   seed: 42
   device: cuda
   precision: fp32
@@ -7,9 +7,9 @@ experiment:
 
 dataset:
   name: cifar10
-  data_dir: /content/drive/MyDrive/ardg/data
+  data_dir: data
   val_ratio: 0.02
-  num_workers: 4
+  num_workers: 0
   augmentation: standard
   max_train_samples: 512
   max_val_samples: 128
@@ -20,7 +20,7 @@ model:
   num_classes: 10
 
 train:
-  mode: pgd_at
+  mode: erm
   epochs: 2
   batch_size: 64
   max_batches: 8
@@ -39,14 +39,6 @@ train:
     eta_min: 0.0
 
 attack:
-  train_domains:
-    - label: pgd_train
-      type: pgd
-      eps: 0.0313725
-      step_size: 0.007843
-      num_steps: 2
-      restarts: 1
-      random_start: true
   val_suite:
     - label: clean
       type: clean
@@ -65,4 +57,4 @@ logging:
     enabled: false
     project: ardg
     entity: ""
-  run_name: smoke_resnet50_colab_pgd_at
+  run_name: smoke_resnet50_local_erm

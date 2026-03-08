@@ -39,32 +39,26 @@ train:
     eta_min: 0.0
 
 attack:
-  train:
-    name: pgd
-    eps: 0.0313725
-    step_size: 0.007843
-    num_steps: 2
-    restarts: 1
-    random_start: true
-  val:
-    name: pgd
-    eps: 0.0313725
-    step_size: 0.007843
-    num_steps: 5
-    restarts: 1
-    random_start: true
-  eval:
-    enabled: false
-    pgd20:
+  train_domains:
+    - label: pgd_train
+      type: pgd
       eps: 0.0313725
       step_size: 0.007843
-      num_steps: 20
-      restarts: 5
-  autoattack:
+      num_steps: 2
+      restarts: 1
+      random_start: true
+  val_suite:
+    - label: clean
+      type: clean
+    - label: pgd5
+      type: pgd
+      eps: 0.0313725
+      step_size: 0.007843
+      num_steps: 5
+      restarts: 1
+      random_start: true
+  eval_suite:
     enabled: false
-    eps: 0.0313725
-    norm: Linf
-    version: standard
 
 logging:
   wandb:

@@ -69,12 +69,18 @@ attack:
         random_start: true
 
   val:
-    name: pgd
-    eps: 0.0313725
-    step_size: 0.007843
-    num_steps: 5
-    restarts: 1
-    random_start: true
+    enabled: false
+
+  val_suite:
+    - label: clean
+      type: clean
+    - label: pgd5
+      type: pgd
+      eps: 0.0313725
+      step_size: 0.007843
+      num_steps: 5
+      restarts: 1
+      random_start: true
 
   eval_suite:
     enabled: false
