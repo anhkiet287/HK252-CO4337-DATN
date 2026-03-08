@@ -74,17 +74,29 @@ ResNet50 examples:
   - `configs/colab/resnet50/train/pgd_at.yaml`
   - `configs/colab/resnet50/train/multi_attack_erm.yaml`
 - Eval:
-  - `configs/colab/resnet50/eval/erm.yaml`
-  - `configs/colab/resnet50/eval/pgd_at.yaml`
-  - `configs/colab/resnet50/eval/multi_attack_erm.yaml`
+  - `configs/colab/resnet50/eval/all_attacks.yaml` (clean + PGD20 + AutoAttack; shared across modes)
 
-## Training
+## Training (minimal commands)
 
-Generic:
+Use the train configs under `configs/colab/resnet50/train/` (same structure for other platforms/models).
 
-```bash
-python scripts/train.py --config <CONFIG_PATH>
-```
+- ERM
+
+  ```bash
+  python scripts/train.py --config configs/colab/resnet50/train/erm.yaml --verbose
+  ```
+
+- PGD-AT
+
+  ```bash
+  python scripts/train.py --config configs/colab/resnet50/train/pgd_at.yaml --verbose
+  ```
+
+- Multi-Attack ERM (saves `best.pt`, `best_worst.pt`, `best_avg.pt`, `last.pt`)
+
+  ```bash
+  python scripts/train.py --config configs/colab/resnet50/train/multi_attack_erm.yaml --verbose
+  ```
 
 Resume latest in run dir:
 
@@ -98,33 +110,27 @@ Resume explicit checkpoint:
 python scripts/train.py --config <CONFIG_PATH> --checkpoint <CKPT_PATH>
 ```
 
-Verbose debug summary:
+## Evaluation (single pipeline for all models)
+
+Default unified eval suite lives in `configs/colab/resnet50/eval/all_attacks.yaml` and covers clean + PGD20 + AutoAttack. Keep the same eval config across models for fairness.
+
+Run full eval:
 
 ```bash
-python scripts/train.py --config <CONFIG_PATH> --verbose
+python scripts/evaluate.py --config configs/colab/resnet50/eval/all_attacks.yaml \
+  --checkpoint /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs/<RUN_NAME>/best.pt \
+  --deterministic --seed 42 --verbose
 ```
 
-## Evaluation (Single Pipeline For All Models)
-
-Generic:
+Smoke 1 sample:
 
 ```bash
-python scripts/evaluate.py --config <CONFIG_PATH> --checkpoint <CKPT_PATH>
+python scripts/evaluate.py --config configs/colab/resnet50/eval/all_attacks.yaml \
+  --checkpoint /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs/<RUN_NAME>/best.pt \
+  --smoke-one-sample
 ```
 
-Smoke (exactly 1 test sample):
-
-```bash
-python scripts/evaluate.py --config <CONFIG_PATH> --checkpoint <CKPT_PATH> --smoke-one-sample
-```
-
-Verbose debug summary:
-
-```bash
-python scripts/evaluate.py --config <CONFIG_PATH> --checkpoint <CKPT_PATH> --verbose
-```
-
-If `--checkpoint` is omitted, evaluator tries `best.pt` then `last.pt` in run dir.
+If `--checkpoint` is omitted, evaluator tries `best.pt` then `last.pt` in the run directory.
 
 ### Unified Eval Suite (Recommended)
 
@@ -225,10 +231,19 @@ Use `attack.eval_suite` configs to keep fairness; point to your checkpoint under
 
 ### Train (Local)
 - Activate env then:  
-  `PYTHONPATH=src python3 scripts/train.py --config configs/colab/resnet50/train/pgd_at.yaml --verbose`
+  `python scripts/train.py --config configs/colab/resnet50/train/pgd_at.yaml --verbose`
 
 ### Evaluate (Local)
-- `PYTHONPATH=src python3 scripts/evaluate.py --config configs/colab/resnet50/eval/all_attacks.yaml --checkpoint outputs/<RUN_NAME>/best.pt --deterministic --seed 42 --verbose`
+- `python scripts/evaluate.py --config configs/colab/resnet50/eval/all_attacks.yaml --checkpoint outputs/<RUN_NAME>/best.pt --deterministic --seed 42 --verbose`
+
+## Run Outputs
+
+Each training run writes to `logging.output_dir` (default `outputs/<run_name>`):
+- `best.pt` – by primary selection vector (default: `val/acc_worst`, then `val/acc_avg`, then `val/acc_clean`).
+- `best_worst.pt` – best on `val/acc_worst` (multi-attack ERM only, when metric exists).
+- `best_avg.pt` – best on `val/acc_avg` (multi-attack ERM only).
+- `last.pt` – last epoch.
+- `train_history.jsonl` / `train_summary.json` – per-epoch logs.
 
 ## Minimal Maintenance Direction
 
