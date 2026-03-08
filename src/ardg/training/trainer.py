@@ -472,13 +472,14 @@ class Trainer:
         run_dir = get_run_dir(self.cfg)
         ensure_dir(run_dir)
         ckpt_path = f"{run_dir}/{name}.pt"
+        selection_names = metrics.get("selection_names")
         state = {
             "model": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "scheduler": self.scheduler.state_dict() if self.scheduler is not None else None,
             "objective": self.objective.state_dict() if hasattr(self.objective, "state_dict") else {},
             "metrics": metrics,
-            "selection_names": selection_names if "selection_names" in metrics else None,
+            "selection_names": selection_names,
             "selection_vector": metrics.get("selection_vector"),
             "epoch": epoch_value,
             "global_step": int(self.global_step),
