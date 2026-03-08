@@ -204,7 +204,7 @@ def main() -> None:
     failures: Dict[str, str] = {}
 
     print(f"[INFO] checkpoint={ckpt_path}")
-    print(f"[INFO] split=test clean_acc={float(clean['acc_clean']):.6f} n={int(clean['n_samples'])}")
+    print(f"[INFO] split=test clean_acc={float(clean['acc']):.6f} n={int(clean['n_samples'])}")
     print(
         f"[INFO] deterministic={eval_deterministic} seed={eval_seed} "
         f"num_workers={int(cfg.get('dataset', {}).get('num_workers', 0))}"
@@ -221,8 +221,8 @@ def main() -> None:
             metrics["runtime_sec"] = float(time.perf_counter() - attack_start)
             robust[label] = metrics
             print(
-                f"[ATTACK] {label}: acc={float(metrics['acc_adv']):.6f} "
-                f"loss={float(metrics['loss_adv']):.6f} n={int(metrics['n_samples'])} "
+                f"[ATTACK] {label}: acc={float(metrics['acc']):.6f} "
+                f"loss={float(metrics['loss']):.6f} n={int(metrics['n_samples'])} "
                 f"runtime={float(metrics['runtime_sec']):.2f}s"
             )
         except Exception as exc:
@@ -230,11 +230,12 @@ def main() -> None:
             print(f"[ERROR] {label}: {exc}")
 
     elapsed = time.perf_counter() - start
-    worst_robust = min((float(v["acc_adv"]) for v in robust.values()), default=float(clean["acc_clean"]))
-
     per_domain = {"clean": clean, **robust}
     summary = summarize_suite(per_domain, prefix="test")
-\n+    metric_row = {k.replace(\"test/\", \"\"): v for k, v in summary.items() if k.startswith(\"test/\")}\n+    metric_row[\"runtime_sec\"] = float(elapsed)\n+    log_metrics(logger, metric_row, step=0, split=\"test\")\n     _log_attack_comparison_chart(clean, robust, step=0)
+
+    metric_row = {k.replace("test/", ""): v for k, v in summary.items() if k.startswith("test/")}
+    metric_row["runtime_sec"] = float(elapsed)
+    log_metrics(logger, metric_row, step=0, split="test")
     _log_attack_comparison_chart(clean, robust, step=0)
 
     sys_metrics: Dict[str, float | str] = {
@@ -262,7 +263,7 @@ def main() -> None:
         "summary": summary,
         "failures": failures,
         "runtime_sec": float(elapsed),
-        "worst_robust_acc": float(worst_robust),
+        "worst_robust_acc": float(summary.get("test/acc_worst", metric_row.get("acc_clean", 0.0))),
     }
     out_path = (
         Path(args.save_json)

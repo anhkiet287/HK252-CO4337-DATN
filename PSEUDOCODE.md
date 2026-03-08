@@ -7,7 +7,7 @@
    - set seed / deterministic mode
    - resolve device (cuda/cpu)
    - init logger + wandb
-3. Build dataloaders (train/val/test).
+3. Build dataloaders (train/val).
 4. Build model.
 5. Build objective from `train.mode`.
    - `erm` / `pgd_at` / `multi_attack_erm` / `rex` / `groupdro` / `groupdro_plus`
@@ -15,7 +15,7 @@
 7. For each epoch:
    - `train_one_epoch()` -> logs `train/loss_{clean|adv}`, `train/acc_{clean|adv}`, `optim/lr`
    - `validate()` -> uses Evaluator + `summarize_suite` (uses `attack.val_suite` when present; defaults to clean+pgd20) → prefixed `val/*` (+ objective extras)
-   - choose/save best checkpoint by selection metric
+   - choose/save best checkpoint by selection metric (plus best_worst/best_avg for multi-attack)
    - save last checkpoint
    - scheduler step
 8. Finish and return checkpoint paths (`best.pt`, `last.pt`).
@@ -36,11 +36,11 @@ train():
 
   for epoch in [start_epoch .. epochs]:
     train_metrics = train_one_epoch(epoch)
-    val_metrics = validate(epoch)  # returns prefixed val metrics + _prefixed stash
+    val_metrics = validate(epoch)  # returns one flat dict of prefixed val/* metrics
 
-    selection_names = resolve_selection_vector(cfg, val_metrics_prefixed)
+    selection_names = resolve_selection_vector(cfg, val_metrics)
     metric_name = selection_names[0]
-    metric_vector = tuple(val_metrics_prefixed[name] for name in selection_names)
+    metric_vector = tuple(val_metrics[name] for name in selection_names)
     metric_value = metric_vector[0]
 
     if is_better(metric_vector, best_vector, eps=1e-6):
@@ -57,7 +57,12 @@ train():
       selection_metric_name=metric_name,
     )
 
-    scheduler.step()
+    if train_mode == "multi_attack_erm":
+      maybe_save("best_worst.pt", metric=val_metrics.get("val/acc_worst"))
+      maybe_save("best_avg.pt",   metric=val_metrics.get("val/acc_avg"))
+
+    if scheduler.step_unit == "epoch":
+      scheduler.step()
 ```
 
 Implementation in repo:
@@ -76,11 +81,13 @@ _train_step(batch):
   batch = objective.preprocess_batch(batch, model)
 
   optimizer.zero_grad()
-  loss, metrics = objective.loss(model, batch)
+  loss, metrics = objective.compute_loss(model, batch)
   loss.backward()
   optimizer.step()
 
   metrics["optim/lr"] = optimizer.lr
+  if scheduler.step_unit == "step":
+    scheduler.step()
   return metrics
 ```
 
@@ -126,10 +133,10 @@ loss:
     mean CE across all domain batches
 
 validate:
-  (current code: clean-only via Evaluator)
+  suite-based via Evaluator + summarize_suite
   optional probe:
     val/pgd20_probe_acc, val/pgd20_probe_loss (objective hook)
-metrics: loss/acc + loss_adv/acc_adv (+ per-domain acc_{name})
+metrics: loss/acc keyed by domain; aggregates in summarize_suite
 ```
 Implementation in repo:
 - `src/ardg/training/objectives/multi_attack_erm.py` (`MultiAttackERM`)
@@ -171,6 +178,26 @@ Implementation in repo:
 - `src/ardg/training/objectives/groupdro_plus.py` (`GroupDROPlus`)
 - Cluster utility used by mode: `src/ardg/training/cluster_utils.py`
 
+### REx
+```text
+preprocess_batch:
+  build multi-domain attacked batch (same strategy as multi-attack)
+
+loss:
+  compute per-domain losses loss_d
+  mean_loss = mean(loss_d)
+  var_loss = variance(loss_d)
+  total_loss = mean_loss + lambda_var * var_loss
+
+metrics:
+  loss_total
+  loss_mean_domains
+  loss_var_domains
+  acc per domain (acc_{name} or acc_adv)
+```
+Implementation in repo:
+- `src/ardg/training/objectives/rex.py` (`REx`)
+
 ## 5) Checkpoint Selection (Multi-Attack)
 
 ```text
@@ -179,6 +206,7 @@ input: val_metrics
 selection_names = train.selection.vector or ["val/acc_worst","val/acc_avg","val/acc_clean"]
 vector = [val_metrics_prefixed[name] for name in selection_names]
 is_better: lexicographic compare(candidate_vector, best_vector, eps=1e-6)
+multi-attack additionally saves best_worst.pt (val/acc_worst) and best_avg.pt (val/acc_avg) when available
 ```
 
 Implementation in repo:
@@ -268,7 +296,7 @@ evaluate_clean():
     logits = model(x)
     loss = CE(logits, y)
     accumulate loss_sum, correct_sum, n
-  return {loss_clean=loss_sum/n, acc_clean=correct_sum/n, n_samples=n}
+  return {loss=loss_sum/n, acc=correct_sum/n, n_samples=n}
 ```
 
 ```text
@@ -280,7 +308,7 @@ evaluate_under_attack(attack):
     logits = model(x_adv)
     loss = CE(logits, y)
     accumulate loss_sum, correct_sum, n
-  return {loss_adv=loss_sum/n, acc_adv=correct_sum/n, n_samples=n}
+  return {loss=loss_sum/n, acc=correct_sum/n, n_samples=n}
 ```
 
 Implementation in repo:

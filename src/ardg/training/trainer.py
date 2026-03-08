@@ -98,6 +98,11 @@ class Trainer:
         sel_cfg = cfg.get("train", {}).get("selection", {})
         self.ckpt_eps = float(sel_cfg.get("eps", 1e-6))
         self.best_ckpt_path: Optional[str] = None
+        self.best_worst_metric = float("-inf")
+        self.best_worst_path: Optional[str] = None
+        self.best_avg_metric = float("-inf")
+        self.best_avg_path: Optional[str] = None
+        self.train_mode = str(cfg.get("train", {}).get("mode", "")).lower()
 
         # early stopping
         es_cfg = cfg["train"].get("early_stopping", {})
@@ -144,13 +149,10 @@ class Trainer:
 
             val_metrics = self.validate(epoch) # prefixed val metrics
             val_metrics["device"] = str(self.device)
-            log_metrics(self.logger, val_metrics, self.global_step, "val")
-            val_pref = val_metrics.get("_prefixed", val_metrics)
-            val_acc = float(
-                val_pref.get("val/acc_clean", val_pref.get("val/acc_adv", val_pref.get("val/acc", 0.0)))
-            ) # cache val acc for select best model 
-            selection_names = _resolve_selection_names(self.cfg, val_pref)
-            ckpt_vector = tuple(float(val_pref.get(n, float("-inf"))) for n in selection_names)
+            log_metrics(self.logger, {k.replace("val/", ""): v for k, v in val_metrics.items()}, self.global_step, "val")
+            val_acc = float(val_metrics.get("val/acc_clean", val_metrics.get("val/acc", 0.0))) # cache val acc for select best model 
+            selection_names = _resolve_selection_names(self.cfg, val_metrics)
+            ckpt_vector = tuple(float(val_metrics.get(n, float("-inf"))) for n in selection_names)
             ckpt_metric_name = selection_names[0] if selection_names else "acc_clean"
             ckpt_metric = ckpt_vector[0] if ckpt_vector else val_acc
 
@@ -207,6 +209,36 @@ class Trainer:
                 },
                 epoch,
             )
+
+            if self.train_mode in {"multi_attack_erm", "multi-attack-erm", "multi_attack"}:
+                if "val/acc_worst" in val_metrics and val_metrics["val/acc_worst"] > self.best_worst_metric + self.ckpt_eps:
+                    self.best_worst_metric = float(val_metrics["val/acc_worst"])
+                    self.best_worst_path = self._save_checkpoint(
+                        "best_worst",
+                        {
+                            "epoch": epoch,
+                            "selection_metric": self.best_worst_metric,
+                            "selection_metric_name": "val/acc_worst",
+                            "val_acc_clean": val_acc,
+                            "selection_names": selection_names,
+                            "selection_vector": ckpt_vector,
+                        },
+                        epoch,
+                    )
+                if "val/acc_avg" in val_metrics and val_metrics["val/acc_avg"] > self.best_avg_metric + self.ckpt_eps:
+                    self.best_avg_metric = float(val_metrics["val/acc_avg"])
+                    self.best_avg_path = self._save_checkpoint(
+                        "best_avg",
+                        {
+                            "epoch": epoch,
+                            "selection_metric": self.best_avg_metric,
+                            "selection_metric_name": "val/acc_avg",
+                            "val_acc_clean": val_acc,
+                            "selection_names": selection_names,
+                            "selection_vector": ckpt_vector,
+                        },
+                        epoch,
+                    )
 
             # early stopping
             should_stop = self._update_early_stopping(epoch, val_metrics)
@@ -412,18 +444,13 @@ class Trainer:
             per_domain["clean"] = self.val_evaluator.evaluate_clean()
 
         summary = summarize_suite(per_domain, prefix="val")
-        metrics_prefixed = {k: v for k, v in summary.items() if k.startswith("val/")}
-        metrics: Dict[str, float] = metrics_prefixed.copy()
+        metrics: Dict[str, float] = {k: v for k, v in summary.items() if k.startswith("val/")}
         try:
             extra = self.objective.validate(self.model, self.val_loader)
         except AttributeError:
             extra = {}
         if isinstance(extra, dict):
-            metrics.update(extra)
-            metrics_prefixed.update({f"val/{k}" if not k.startswith("val/") else k: v for k, v in extra.items()})
-
-        # stash prefixed metrics for selection
-        metrics["_prefixed"] = metrics_prefixed
+            metrics.update({f"val/{k}" if not k.startswith("val/") else k: v for k, v in extra.items()})
         return metrics
 
     def _train_step(self, batch: Any) -> Dict[str, Any]:

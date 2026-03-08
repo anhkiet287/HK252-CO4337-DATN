@@ -26,16 +26,14 @@ def summarize_suite(per_domain: Mapping[str, Mapping[str, float]], prefix: str) 
         if not isinstance(metrics, Mapping):
             continue
 
+        acc = float(metrics.get("acc", 0.0))
+        loss = float(metrics.get("loss", 0.0))
+
         if name == "clean":
-            acc = float(metrics.get("acc_clean", metrics.get("acc", 0.0)))
-            loss = float(metrics.get("loss_clean", metrics.get("loss", 0.0)))
             flat[f"{prefix}/acc_clean"] = acc
             flat[f"{prefix}/loss_clean"] = loss
             continue
 
-        # adversarial / attack domain
-        acc = float(metrics.get("acc_adv", metrics.get("acc", 0.0)))
-        loss = float(metrics.get("loss_adv", metrics.get("loss", 0.0)))
         flat[f"{prefix}/acc_{name}"] = acc
         flat[f"{prefix}/loss_{name}"] = loss
         adv_accs[name] = acc

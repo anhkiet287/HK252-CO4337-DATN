@@ -59,8 +59,8 @@ class Evaluator:
             total_correct += int((logits.argmax(dim=1) == labels).sum().item())
             total_seen += int(images.size(0))
         return {
-            "loss_clean": total_loss / max(total_seen, 1),
-            "acc_clean": total_correct / max(total_seen, 1),
+            "loss": total_loss / max(total_seen, 1),
+            "acc": total_correct / max(total_seen, 1),
             "n_samples": float(total_seen),
         }
 
@@ -82,8 +82,8 @@ class Evaluator:
             total_correct += int((logits.argmax(dim=1) == labels).sum().item())
             total_seen += int(images.size(0))
         return {
-            "acc_adv": total_correct / max(total_seen, 1),
-            "loss_adv": total_loss / max(total_seen, 1),
+            "acc": total_correct / max(total_seen, 1),
+            "loss": total_loss / max(total_seen, 1),
             "n_samples": float(total_seen),
         }
 
