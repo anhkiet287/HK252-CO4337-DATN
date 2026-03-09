@@ -176,10 +176,14 @@ class Trainer:
                         "selection_metric": ckpt_metric,
                         "selection_metric_name": ckpt_metric_name,
                         "val_loss_clean": float(
-                            val_metrics.get("loss_clean", val_metrics.get("loss_adv", 0.0))
+                            val_metrics.get(
+                                "val/loss_clean",
+                                val_metrics.get("loss_clean", val_metrics.get("val/loss_adv", val_metrics.get("loss_adv", 0.0))),
+                            )
                         ),
                         "selection_names": selection_names,
                         "selection_vector": ckpt_vector,
+                        "val_metrics": dict(val_metrics),
                     },
                     epoch,
                 )
@@ -202,15 +206,19 @@ class Trainer:
                     "selection_metric": ckpt_metric,
                     "selection_metric_name": ckpt_metric_name,
                     "val_loss_clean": float(
-                        val_metrics.get("loss_clean", val_metrics.get("loss_adv", 0.0))
+                        val_metrics.get(
+                            "val/loss_clean",
+                            val_metrics.get("loss_clean", val_metrics.get("val/loss_adv", val_metrics.get("loss_adv", 0.0))),
+                        )
                     ),
                     "selection_names": selection_names,
                     "selection_vector": ckpt_vector,
+                    "val_metrics": dict(val_metrics),
                 },
                 epoch,
             )
 
-            if self.train_mode in {"multi_attack_erm", "multi-attack-erm", "multi_attack"}:
+            if self.train_mode in {"multi_attack_erm", "multi-attack-erm", "multi_attack", "groupdro", "group_dro"}:
                 if "val/acc_worst" in val_metrics and val_metrics["val/acc_worst"] > self.best_worst_metric + self.ckpt_eps:
                     self.best_worst_metric = float(val_metrics["val/acc_worst"])
                     self.best_worst_path = self._save_checkpoint(
@@ -222,6 +230,7 @@ class Trainer:
                             "val_acc_clean": val_acc,
                             "selection_names": selection_names,
                             "selection_vector": ckpt_vector,
+                            "val_metrics": dict(val_metrics),
                         },
                         epoch,
                     )
@@ -236,6 +245,7 @@ class Trainer:
                             "val_acc_clean": val_acc,
                             "selection_names": selection_names,
                             "selection_vector": ckpt_vector,
+                            "val_metrics": dict(val_metrics),
                         },
                         epoch,
                     )
@@ -303,6 +313,10 @@ class Trainer:
             self.best_vector = tuple(float(x) for x in checkpoint["best_vector"])
         elif checkpoint.get("best_metric") is not None:
             self.best_vector = (float(checkpoint["best_metric"]),)
+        if checkpoint.get("best_worst_metric") is not None:
+            self.best_worst_metric = float(checkpoint["best_worst_metric"])
+        if checkpoint.get("best_avg_metric") is not None:
+            self.best_avg_metric = float(checkpoint["best_avg_metric"])
 
         if checkpoint.get("es_state") and isinstance(checkpoint["es_state"], dict):
             es_state = checkpoint["es_state"]
@@ -394,6 +408,10 @@ class Trainer:
         total_correct = 0
         total_seen = 0
         domain_counts: Dict[str, float] = {}
+        group_counts: Dict[str, float] = {}
+        extra_metric_sums: Dict[str, float] = {}
+        extra_metric_weights: Dict[str, float] = {}
+        extra_metric_last: Dict[str, Any] = {}
         last_domain_name: str | None = None
         loss_key, acc_key = self._train_metric_keys()
 
@@ -407,8 +425,16 @@ class Trainer:
                 last_domain_name = str(metrics["domain_name"])
             batch_domain_counts = metrics.get("domain_batch_counts")
             if isinstance(batch_domain_counts, dict):
-                for name, count in batch_domain_counts.items():
-                    domain_counts[str(name)] = domain_counts.get(str(name), 0.0) + float(count)
+                _accumulate_named_counts(domain_counts, batch_domain_counts)
+            batch_group_counts = metrics.get("group_batch_counts")
+            if isinstance(batch_group_counts, dict):
+                _accumulate_named_counts(group_counts, batch_group_counts)
+            _accumulate_step_metrics(
+                extra_metric_sums,
+                extra_metric_weights,
+                extra_metric_last,
+                metrics,
+            )
 
             if self.log_interval and step_idx % self.log_interval == 0:
                 batch_metrics = {
@@ -418,6 +444,7 @@ class Trainer:
                 }
                 if "domain_name" in metrics:
                     batch_metrics["domain_name"] = metrics["domain_name"]
+                batch_metrics.update(_extract_loggable_step_metrics(metrics))
                 log_metrics(self.logger, batch_metrics, self.global_step, "train_batch")
             if self.max_train_batches and step_idx >= self.max_train_batches:
                 break
@@ -426,10 +453,16 @@ class Trainer:
         acc = total_correct / max(total_seen, 1)
         current_lr = self.optimizer.param_groups[0]["lr"]
         epoch_metrics: Dict[str, Any] = {loss_key: avg_loss, acc_key: acc, "optim/lr": current_lr}
+        for name, total in extra_metric_sums.items():
+            weight = max(extra_metric_weights.get(name, 0.0), 1.0)
+            epoch_metrics[name] = total / weight
+        epoch_metrics.update(extra_metric_last)
         if last_domain_name is not None:
             epoch_metrics["domain_name"] = last_domain_name
         for name, count in domain_counts.items():
             epoch_metrics[f"domain_count/{name}"] = count
+        for name, count in group_counts.items():
+            epoch_metrics[f"group_count/{name}"] = count
         return epoch_metrics
 
     def validate(self, epoch: int) -> Dict[str, float]:
@@ -487,6 +520,8 @@ class Trainer:
             "best_metric_name": str(self.best_metric_name),
             "best_epoch": int(self.best_epoch),
             "best_vector": list(self.best_vector) if self.best_vector is not None else None,
+            "best_worst_metric": float(self.best_worst_metric),
+            "best_avg_metric": float(self.best_avg_metric),
             "es_state": {
                 "enabled": bool(self.es_enabled),
                 "best_metric": float(self.es_best_metric),
@@ -532,6 +567,17 @@ def _resolve_selection_names(cfg: Dict[str, Any], metrics: Dict[str, float]) -> 
 
     if names:
         return names
+
+    train_cfg = cfg.get("train", {})
+    mode = str(train_cfg.get("mode", "")).lower()
+    if mode in {"groupdro", "group_dro"}:
+        groupdro_metric = str(train_cfg.get("groupdro", {}).get("selection_metric", "")).strip()
+        if groupdro_metric:
+            names = [groupdro_metric]
+            for fallback in ("val/acc_avg", "val/acc_clean"):
+                if fallback in metrics and fallback not in names:
+                    names.append(fallback)
+            return names
 
     # default heuristic
     if "val/acc_worst" in metrics and "val/acc_avg" in metrics:
@@ -632,3 +678,49 @@ def _build_val_suite(cfg: Dict[str, Any], model: Any) -> Dict[str, Any]:
     tmp_attack["eval_suite"] = val_specs
     tmp_cfg["attack"] = tmp_attack
     return build_eval_suite(tmp_cfg, model)
+
+
+def _accumulate_named_counts(target: Dict[str, float], counts: Dict[str, Any]) -> None:
+    for name, count in counts.items():
+        target[str(name)] = target.get(str(name), 0.0) + float(count)
+
+
+def _is_numeric_metric(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _should_aggregate_step_metric(name: str, value: Any) -> bool:
+    if name in {"loss", "acc", "correct", "batch_size", "optim/lr"}:
+        return False
+    if name in {"domain_name", "worst_group_by_loss"}:
+        return False
+    if name.endswith("_batch_counts"):
+        return False
+    return _is_numeric_metric(value)
+
+
+def _accumulate_step_metrics(
+    sums: Dict[str, float],
+    weights: Dict[str, float],
+    latest: Dict[str, Any],
+    metrics: Dict[str, Any],
+) -> None:
+    batch_size = float(metrics.get("batch_size", 1) or 1)
+    for key, value in metrics.items():
+        if _should_aggregate_step_metric(key, value):
+            sums[key] = sums.get(key, 0.0) + float(value) * batch_size
+            weights[key] = weights.get(key, 0.0) + batch_size
+        elif key in {"domain_name", "worst_group_by_loss"} and value is not None:
+            latest[key] = value
+
+
+def _extract_loggable_step_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    logged: Dict[str, Any] = {}
+    for key, value in metrics.items():
+        if key in {"loss", "acc", "correct", "batch_size", "optim/lr", "domain_name"}:
+            continue
+        if key.endswith("_batch_counts"):
+            continue
+        if _is_numeric_metric(value) or isinstance(value, str):
+            logged[key] = value
+    return logged

@@ -14,10 +14,17 @@ model:
   num_classes: 10
 train:
   mode: groupdro
-  adv_training: true
+  domain_strategy: all_domains
   epochs: 100
   batch_size: 256
   log_interval: 50
+  selection:
+    vector: ["val/acc_worst", "val/acc_avg", "val/acc_clean"]
+    eps: 1e-6
+  early_stopping:
+    enabled: false
+    metric: val/acc_worst
+    mode: max
   optimizer:
     name: sgd
     lr: 0.1
@@ -28,26 +35,90 @@ train:
     t_max: 100
     eta_min: 0.0
   groupdro:
-    eta: 0.02
+    eta_q: 0.02
+    include_clean: true
+    init_q: uniform
+    selection_metric: val/acc_worst
 attack:
-  train:
-    name: pgd
-    eps: 0.0313725
-    step_size: 0.007843
-    num_steps: 7
-  val:
-    name: pgd
-    eps: 0.0313725
-    step_size: 0.007843
-    num_steps: 20
-  eval:
-    name: attack_suite
-    eps: 0.0313725
-    step_size: 0.007843
-    num_steps: 20
-  autoattack:
+  train_domains:
+    - label: clean
+      type: clean
+    - label: fgsm_rs
+      type: fgsm
+      eps: 0.0313725
+      alpha: 0.0313725
+      random_start: true
+    - label: pgd_ce
+      type: pgd
+      eps: 0.0313725
+      step_size: 0.007843
+      num_steps: 7
+      restarts: 1
+      loss: ce
+      random_start: true
+    - label: pgd_dlr
+      type: pgd
+      eps: 0.0313725
+      step_size: 0.007843
+      num_steps: 7
+      restarts: 1
+      loss: dlr
+      random_start: true
+  val_suite:
+    attacks:
+      - label: clean
+        type: clean
+      - label: fgsm_rs
+        type: fgsm
+        eps: 0.0313725
+        alpha: 0.0313725
+        random_start: true
+      - label: pgd_ce
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 7
+        restarts: 1
+        loss: ce
+        random_start: true
+      - label: pgd_dlr
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 7
+        restarts: 1
+        loss: dlr
+        random_start: true
+  eval_suite:
+    max_batches: 0
+    attacks:
+      - label: clean
+        type: clean
+      - label: pgd20
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 20
+        restarts: 5
+        loss: ce
+        random_start: true
+      - label: autoattack
+        type: autoattack
+        norm: Linf
+        eps: 0.0313725
+        version: standard
+        n_classes: 10
+        verbose: false
+val:
+  probe:
     enabled: true
+    type: pgd
+    norm: Linf
     eps: 0.0313725
+    steps: 20
+    alpha: 0.007843
+    restarts: 1
+    max_batches: 10
 logging:
   wandb:
     enabled: true
