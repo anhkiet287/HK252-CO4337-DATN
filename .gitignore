@@ -6,6 +6,10 @@ __pycache__/
 build/
 dist/
 *.egg-info/
-data/
+/data/
 wandb/
 src/ardg.egg-info
+outputs/
+*.pt
+runs/
+models/*.tar

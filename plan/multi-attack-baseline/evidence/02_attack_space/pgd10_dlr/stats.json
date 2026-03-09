@@ -1,0 +1,23 @@
+{
+  "attack_label": "pgd10_dlr",
+  "attack_name": "pgd",
+  "num_samples": 8,
+  "eps_config": 0.0313725,
+  "linf_pixel_max": 0.0313725471496582,
+  "linf_pixel_mean": 0.03137227147817612,
+  "linf_norm_max": 0.12883996963500977,
+  "linf_norm_mean": 0.12883888185024261,
+  "eps_ok": true,
+  "clean_acc_batch": 0.125,
+  "adv_acc_batch": 0.125,
+  "prediction_changed_count": 0,
+  "prediction_changed_rate": 0.0,
+  "files": {
+    "clean_pixel": "plan/multi-attack-baseline/evidence/02_attack_space/pgd10_dlr/clean_pixel.png",
+    "adv_pixel": "plan/multi-attack-baseline/evidence/02_attack_space/pgd10_dlr/adv_pixel.png",
+    "perturbation_pixel_signed": "plan/multi-attack-baseline/evidence/02_attack_space/pgd10_dlr/perturbation_pixel_signed.png",
+    "clean_normalized_scaled": "plan/multi-attack-baseline/evidence/02_attack_space/pgd10_dlr/clean_normalized_scaled.png",
+    "adv_normalized_scaled": "plan/multi-attack-baseline/evidence/02_attack_space/pgd10_dlr/adv_normalized_scaled.png",
+    "perturbation_normalized_signed": "plan/multi-attack-baseline/evidence/02_attack_space/pgd10_dlr/perturbation_normalized_signed.png"
+  }
+}

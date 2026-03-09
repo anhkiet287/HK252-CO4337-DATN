@@ -1,0 +1,92 @@
+"""GroupDRO objective (requires group ids)."""
+
+from __future__ import annotations
+
+from typing import Any, Dict, Tuple
+
+import torch
+
+from ardg.training.losses import compute_loss
+from ardg.training.objectives.base import Objective
+from ardg.attacks.attack_suite import build_train_attack
+from ardg.utils.batch import unpack_xyg
+
+
+class GroupDRO(Objective):
+    """Implements multiplicative weight updates over groups."""
+
+    def __init__(self, cfg: Dict[str, Any], model: Any | None = None) -> None:
+        gd_cfg = cfg.get("train", {}).get("groupdro", {})
+        self.eta = float(gd_cfg.get("eta", 0.02))
+        self.q: torch.Tensor | None = None
+        self.attack = None
+        if cfg["train"].get("adv_training", False) and model is not None:
+            self.attack = build_train_attack(cfg, model)
+
+    def preprocess_batch(self, batch: Any, model: Any) -> Any:
+        if self.attack is None:
+            return batch
+        images, labels, groups = unpack_xyg(batch)
+        model.eval()
+        adv = self.attack(images, labels)
+        model.train()
+        adv = adv.detach()
+        if isinstance(batch, dict):
+            newb = dict(batch)
+            newb["x"] = adv
+            newb["g"] = groups
+            return newb
+        return adv, labels, groups
+
+    def _maybe_init_q(self, num_groups: int, device: torch.device) -> None:
+        if self.q is None or self.q.numel() != num_groups:
+            self.q = torch.ones(num_groups, device=device) / float(num_groups)
+
+    def compute_loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
+        images, labels, groups = unpack_xyg(batch)
+        device = labels.device
+        num_groups = int(groups.max().item()) + 1
+        self._maybe_init_q(num_groups, device)
+
+        logits = model(images)
+        losses = []
+        loss_g = torch.zeros(num_groups, device=device)
+        counts = torch.zeros(num_groups, device=device)
+        for g in range(num_groups):
+            mask = groups == g
+            if mask.any():
+                l = compute_loss(logits[mask], labels[mask])
+                losses.append(l)
+                loss_g[g] = l
+                counts[g] = mask.sum()
+        # Update q with observed groups only
+        observed = counts > 0
+        if observed.any():
+            self.q[observed] = self.q[observed] * torch.exp(self.eta * loss_g[observed].detach())
+        self.q = self.q / self.q.sum()
+
+        total = (loss_g * self.q).sum()
+        correct = (logits.argmax(dim=1) == labels).sum().item()
+        is_adv = self.attack is not None
+        metrics = {
+            "loss": float(total.item()),
+            "acc": correct / max(labels.size(0), 1),
+            ("loss_adv" if is_adv else "loss_clean"): float(total.item()),
+            ("acc_adv" if is_adv else "acc_clean"): correct / max(labels.size(0), 1),
+            "correct": correct,
+            "batch_size": labels.size(0),
+            "q_max": float(self.q.max().item()),
+            "q_min": float(self.q.min().item()),
+        }
+        # Log first few group losses
+        for g in range(min(3, num_groups)):
+            metrics[f"loss_g{g}"] = float(loss_g[g].item())
+        return total, metrics
+
+    def state_dict(self) -> Dict[str, Any]:
+        return {"q": self.q} if self.q is not None else {}
+
+    def load_state_dict(self, state: Dict[str, Any]) -> None:
+        q = state.get("q")
+        if q is not None:
+            self.q = q

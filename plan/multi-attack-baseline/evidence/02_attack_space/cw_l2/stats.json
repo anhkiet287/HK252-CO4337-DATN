@@ -1,0 +1,23 @@
+{
+  "attack_label": "cw_l2",
+  "attack_name": "cw",
+  "num_samples": 8,
+  "eps_config": null,
+  "linf_pixel_max": 2.9802322387695312e-08,
+  "linf_pixel_mean": 2.60770320892334e-08,
+  "linf_norm_max": 2.384185791015625e-07,
+  "linf_norm_mean": 1.7881393432617188e-07,
+  "eps_ok": null,
+  "clean_acc_batch": 0.125,
+  "adv_acc_batch": 0.125,
+  "prediction_changed_count": 0,
+  "prediction_changed_rate": 0.0,
+  "files": {
+    "clean_pixel": "plan/multi-attack-baseline/evidence/02_attack_space/cw_l2/clean_pixel.png",
+    "adv_pixel": "plan/multi-attack-baseline/evidence/02_attack_space/cw_l2/adv_pixel.png",
+    "perturbation_pixel_signed": "plan/multi-attack-baseline/evidence/02_attack_space/cw_l2/perturbation_pixel_signed.png",
+    "clean_normalized_scaled": "plan/multi-attack-baseline/evidence/02_attack_space/cw_l2/clean_normalized_scaled.png",
+    "adv_normalized_scaled": "plan/multi-attack-baseline/evidence/02_attack_space/cw_l2/adv_normalized_scaled.png",
+    "perturbation_normalized_signed": "plan/multi-attack-baseline/evidence/02_attack_space/cw_l2/perturbation_normalized_signed.png"
+  }
+}

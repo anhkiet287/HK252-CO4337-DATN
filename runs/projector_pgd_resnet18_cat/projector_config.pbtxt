@@ -1,0 +1,50 @@
+embeddings {
+  tensor_name: "penultimate_xt:00000"
+  metadata_path: "00000/penultimate_xt\\metadata.tsv"
+  sprite {
+    image_path: "00000/penultimate_xt\\sprite.png"
+    single_image_dim: 32
+    single_image_dim: 32
+  }
+  tensor_path: "00000/penultimate_xt\\tensors.tsv"
+}
+embeddings {
+  tensor_name: "penultimate_delta:00000"
+  metadata_path: "00000/penultimate_delta\\metadata.tsv"
+  sprite {
+    image_path: "00000/penultimate_delta\\sprite.png"
+    single_image_dim: 32
+    single_image_dim: 32
+  }
+  tensor_path: "00000/penultimate_delta\\tensors.tsv"
+}
+embeddings {
+  tensor_name: "layer4_xt:00000"
+  metadata_path: "00000/layer4_xt\\metadata.tsv"
+  sprite {
+    image_path: "00000/layer4_xt\\sprite.png"
+    single_image_dim: 32
+    single_image_dim: 32
+  }
+  tensor_path: "00000/layer4_xt\\tensors.tsv"
+}
+embeddings {
+  tensor_name: "layer3_xt:00000"
+  metadata_path: "00000/layer3_xt\\metadata.tsv"
+  sprite {
+    image_path: "00000/layer3_xt\\sprite.png"
+    single_image_dim: 32
+    single_image_dim: 32
+  }
+  tensor_path: "00000/layer3_xt\\tensors.tsv"
+}
+embeddings {
+  tensor_name: "logits_xt:00000"
+  metadata_path: "00000/logits_xt\\metadata.tsv"
+  sprite {
+    image_path: "00000/logits_xt\\sprite.png"
+    single_image_dim: 32
+    single_image_dim: 32
+  }
+  tensor_path: "00000/logits_xt\\tensors.tsv"
+}

@@ -1,0 +1,115 @@
+experiment:
+  seed: 42
+  device: cuda
+  precision: fp16
+  deterministic: true
+dataset:
+  name: cifar10
+  data_dir: data
+  val_ratio: 0.02
+  num_workers: 8
+  augmentation: standard
+model:
+  name: resnet18_cifar
+  num_classes: 10
+train:
+  mode: groupdro_plus
+  adv_training: true
+  epochs: 100
+  batch_size: 256
+  log_interval: 50
+  optimizer:
+    name: sgd
+    lr: 0.1
+    momentum: 0.9
+    weight_decay: 0.0005
+  scheduler:
+    name: cosine
+    t_max: 100
+    eta_min: 0.0
+  groupdro:
+    eta: 0.02
+  groupdro_plus:
+    num_clusters: 4
+    eta: 0.02
+    lambda_reg: 0.5
+    gamma: 1.0
+attack:
+  train_suite:
+    attacks:
+      - label: pgd_train
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 7
+  val:
+    name: pgd
+    eps: 0.0313725
+    step_size: 0.007843
+    num_steps: 20
+  eval_suite:
+    max_batches: 0
+    attacks:
+      - label: fgsm
+        type: fgsm
+        eps: 0.0313725
+      - label: fgsm_rs
+        type: fgsm_rs
+        eps: 0.0313725
+        alpha: 0.0313725
+      - label: pgd10_ce
+        type: pgd
+        eps: 0.0313725
+        alpha: 0.007843
+        steps: 10
+        loss: ce
+        random_start: true
+      - label: pgd20
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 20
+        restarts: 5
+        loss: ce
+        random_start: true
+      - label: pgd10_dlr
+        type: pgd
+        eps: 0.0313725
+        alpha: 0.007843
+        steps: 10
+        loss: dlr
+        random_start: true
+      - label: cw_l2
+        type: cw
+        steps: 50
+        lr: 0.01
+      - label: deepfool_l2
+        type: deepfool
+        steps: 50
+        overshoot: 0.02
+      - label: fab_linf
+        type: fab
+        norm: Linf
+        eps: 0.0313725
+        steps: 30
+        restarts: 1
+      - label: square_linf
+        type: square
+        norm: Linf
+        eps: 0.0313725
+        n_queries: 5000
+        restarts: 1
+      - label: autoattack
+        type: autoattack
+        norm: Linf
+        eps: 0.0313725
+        version: standard
+        n_classes: 10
+        verbose: false
+logging:
+  wandb:
+    enabled: true
+    project: ardg
+    entity: ''
+  run_name: resnet18_local_groupdro_plus_at
+  output_dir: outputs/local

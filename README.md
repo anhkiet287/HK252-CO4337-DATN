@@ -1,91 +1,260 @@
 # ARDG (Adversarial Robust Domain Generalization)
 
-Research-oriented **CIFAR-10** robust training/evaluation using **PGD Adversarial Training (PGD-AT)** and a standardized **attack suite**.
+Minimal training/evaluation pipeline for CIFAR-style adversarial robustness and DG experiments.
 
-- Primary attack backend: **TorchAttacks**
-- **AutoAttack** is used for evaluation only (optional)
+## Current Status
 
----
+Implemented training modes:
+- `erm`
+- `pgd_at`
+- `multi_attack_erm`
+- `rex`
+- `groupdro`
+- `groupdro_plus`
 
-## Quick start
+Attack backend:
+- `torchattacks` for training and evaluation attacks
 
-Run from the repo root.
+Main idea of current codebase:
+- keep training objectives modular
+- use one evaluation entry point: `scripts/evaluate.py`
+- use one evaluation attack interface: `attack.eval_suite`
+- keep train/eval configs separated (`.../at|erm/...` for train, `.../eval/...` for eval)
+- keep experiments deterministic and comparable
 
-### 1) Install
+## Execution Policy
 
-**Recommended (editable install for research/dev):**
+1. Implement and debug locally first.
+2. Run preflight + smoke train + smoke eval locally.
+3. Run full experiments on Colab GPU.
+4. Use fixed Colab output root:
+   `/content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs`
+
+## Setup
+
+Local:
+
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 ```
 
-With Weights & Biases logging (optional):
+Optional extras:
+
 ```bash
 pip install -e ".[wandb]"
-```
-
-Dev tools (tests + lint, optional):
-```bash
+pip install -e ".[autoattack]"
 pip install -e ".[dev]"
 ```
 
-We recommend `pip install -e .` so that local code changes are immediately reflected without reinstalling.
+## Core Entry Points
 
----
+- Train: `scripts/train.py`
+- Evaluate: `scripts/evaluate.py`
+- Preflight: `scripts/preflight_check.py`
+- Attack visualize: `scripts/attack_visual_check.py`
+- Smoke batch runner: `scripts/smoke_test.py`
 
-### 2) Train (creates splits on the fly)
+Core modules:
+- Trainer loop: `src/ardg/training/trainer.py`
+- Objectives: `src/ardg/training/objectives/`
+- Evaluator class: `src/ardg/evaluation/evaluator.py`
+- Attack factory/suites: `src/ardg/attacks/attack_suite.py`
+
+## Config Layout (Train vs Eval)
+
+For each model family, maintain separate configs:
+- Train configs: `configs/<platform>/<model_family>/train/*.yaml`
+- Eval configs: `configs/<platform>/<model_family>/eval/*.yaml`
+
+ResNet50 examples:
+- Train:
+  - `configs/colab/resnet50/train/erm.yaml`
+  - `configs/colab/resnet50/train/pgd_at.yaml`
+  - `configs/colab/resnet50/train/multi_attack_erm.yaml`
+- Eval:
+  - `configs/colab/resnet50/eval/all_attacks.yaml` (clean + PGD20 + AutoAttack; shared across modes)
+
+## Training (minimal commands)
+
+Use the train configs under `configs/colab/resnet50/train/` (same structure for other platforms/models).
+
+- ERM
+
+  ```bash
+  python scripts/train.py --config configs/colab/resnet50/train/erm.yaml --verbose
+  ```
+
+- PGD-AT
+
+  ```bash
+  python scripts/train.py --config configs/colab/resnet50/train/pgd_at.yaml --verbose
+  ```
+
+- Multi-Attack ERM (saves `best.pt`, `best_worst.pt`, `best_avg.pt`, `last.pt`)
+
+  ```bash
+  python scripts/train.py --config configs/colab/resnet50/train/multi_attack_erm.yaml --verbose
+  ```
+
+Resume latest in run dir:
 
 ```bash
-python scripts/train.py --config configs/default.yaml
+python scripts/train.py --config <CONFIG_PATH> --resume
 ```
 
-This downloads CIFAR (if missing), creates a stratified split from the config seed/val_ratio, and logs metrics to console/W&B (if enabled).
-
----
-
-### 3) Evaluate (val + test)
+Resume explicit checkpoint:
 
 ```bash
-python scripts/evaluate.py --config configs/default.yaml --checkpoint <path_to_checkpoint>
+python scripts/train.py --config <CONFIG_PATH> --checkpoint <CKPT_PATH>
 ```
 
-Runs clean + configured attacks (and AutoAttack if enabled) on both val/test splits and logs to console/W&B.
+## Evaluation (single pipeline for all models)
 
----
+Default unified eval suite lives in `configs/colab/resnet50/eval/all_attacks.yaml` and covers clean + PGD20 + AutoAttack. Keep the same eval config across models for fairness.
 
----
-
-## Repo layout (essentials)
-- `configs/default.yaml` — single source of truth (dataset/model/train/attacks/logging)
-- `scripts/` — entry points (prepare_data.py, train.py, evaluate.py)
-- `src/ardg/` — library code (models, attacks, training, evaluation, utils)
-- `data/` — dataset cache + processed split artifacts
-- `outputs/` — runtime artifacts (not committed)
-
----
-
-## Config notes
-
-Default config targets:
-- CIFAR-10
-- stratified validation split: 2%
-- seed: 42
-- training: PGD-AT (ℓ∞)
-- evaluation: clean + attack suite (+ optional AutoAttack)
-
-All hyperparameters must be controlled via `configs/default.yaml` (no hardcoded experiment settings inside code).
-
----
-
-## Testing
+Run full eval:
 
 ```bash
-pytest -q
+python scripts/evaluate.py --config configs/colab/resnet50/eval/all_attacks.yaml \
+  --checkpoint /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs/<RUN_NAME>/best.pt \
+  --deterministic --seed 42 --verbose
 ```
 
----
+Smoke 1 sample:
 
-## Minimal dev rules (for clean reviews)
-- `scripts/` = entry points only (no heavy logic)
-- Core logic lives in `src/ardg/`
-- Keep functions small and composable (avoid "god functions")
-- Add/modify experiments via config, not by editing training code
+```bash
+python scripts/evaluate.py --config configs/colab/resnet50/eval/all_attacks.yaml \
+  --checkpoint /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs/<RUN_NAME>/best.pt \
+  --smoke-one-sample
+```
+
+If `--checkpoint` is omitted, evaluator tries `best.pt` then `last.pt` in the run directory.
+
+### Unified Eval Suite (Recommended)
+
+Use this in configs (`attack.eval_suite`) for all models/modes to ensure fairness:
+
+```yaml
+attack:
+  eval_suite:
+    max_batches: 0
+    attacks:
+      - label: pgd20
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 20
+        restarts: 5
+        loss: ce
+        random_start: true
+      - label: autoattack
+        type: autoattack
+        norm: Linf
+        eps: 0.0313725
+        version: standard
+        n_classes: 10
+        verbose: false
+```
+
+## Preflight
+
+Check normalization and attack-space consistency before training:
+
+```bash
+python scripts/preflight_check.py --config <CONFIG_PATH> --io_mode normalized
+python scripts/preflight_check.py --config <CONFIG_PATH> --io_mode pixel
+```
+
+## Attack Visualization
+
+Single source attack:
+
+```bash
+python scripts/attack_visual_check.py --config <CONFIG_PATH> --checkpoint <CKPT_PATH> --split test --attack-source train --attack from_source --num-samples 8 --strict-eps
+```
+
+Run all attacks side-by-side:
+
+```bash
+python scripts/attack_visual_check.py --config <CONFIG_PATH> --checkpoint <CKPT_PATH> --split test --all-attacks --num-samples 8 --strict-eps
+```
+
+## Determinism and Fairness Rules
+
+Use the same settings across compared runs:
+- same dataset split and seed
+- same threat model (`norm`, `eps`)
+- same eval suite (`attack.eval_suite`)
+- same deterministic flag
+- same eval sample count / max batches
+
+Required config defaults:
+- `experiment.deterministic: true`
+- fixed `experiment.seed`
+
+Evaluator deterministic controls:
+- `--deterministic` / `--no-deterministic`
+- `--seed <int>`
+- `--max-batches <int>`
+- `--max-test-samples <int>`
+
+## W&B Organization
+
+You can group runs by model and stage via config:
+
+```yaml
+logging:
+  wandb:
+    enabled: true
+    project: ardg
+    entity: ""
+    group_template: "{model}/{stage}"   # e.g., resnet50/train, resnet50/eval
+    add_default_tags: true
+```
+
+## Colab Commands (Style)
+
+Use single-line `!python` commands.
+
+### Train (Colab, ResNet50)
+- ERM: `!python scripts/train.py --config configs/colab/resnet50/train/erm.yaml --verbose`
+- PGD-AT: `!python scripts/train.py --config configs/colab/resnet50/train/pgd_at.yaml --verbose`
+- Multi-Attack ERM: `!python scripts/train.py --config configs/colab/resnet50/train/multi_attack_erm.yaml --verbose`
+
+### Evaluate (Colab, unified eval suite)
+Use `attack.eval_suite` configs to keep fairness; point to your checkpoint under `/content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs/<RUN_NAME>/best.pt`.
+- ERM/PGD-AT/Multi-Attack (all attacks):  
+  `!python scripts/evaluate.py --config configs/colab/resnet50/eval/all_attacks.yaml --checkpoint /content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs/<RUN_NAME>/best.pt --deterministic --seed 42 --verbose`
+- Smoke (1 sample): add `--smoke-one-sample`
+
+### Train (Local)
+- Activate env then:  
+  `python scripts/train.py --config configs/colab/resnet50/train/pgd_at.yaml --verbose`
+
+### Evaluate (Local)
+- `python scripts/evaluate.py --config configs/colab/resnet50/eval/all_attacks.yaml --checkpoint outputs/<RUN_NAME>/best.pt --deterministic --seed 42 --verbose`
+
+## Run Outputs
+
+Each training run writes to `logging.output_dir` (default `outputs/<run_name>`):
+- `best.pt` – by primary selection vector (default: `val/acc_worst`, then `val/acc_avg`, then `val/acc_clean`).
+- `best_worst.pt` – best on `val/acc_worst` (multi-attack ERM only, when metric exists).
+- `best_avg.pt` – best on `val/acc_avg` (multi-attack ERM only).
+- `last.pt` – last epoch.
+- `train_history.jsonl` / `train_summary.json` – per-epoch logs.
+
+## Minimal Maintenance Direction
+
+Keep this repo simple and stable:
+- keep one eval entrypoint (`scripts/evaluate.py`)
+- keep one eval config interface (`attack.eval_suite`)
+- keep objectives isolated in `training/objectives/`
+- keep attack construction centralized in `attacks/attack_suite.py`
+- avoid duplicating mode-specific eval scripts
+
+Short-term cleanup targets:
+- migrate remaining legacy `attack.eval` + `attack.autoattack` configs to `attack.eval_suite`
+- keep smoke configs minimal and deterministic (1-sample eval when needed)
+- keep debugging through `--verbose` flags instead of custom temporary scripts

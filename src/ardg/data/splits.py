@@ -8,14 +8,21 @@ import numpy as np
 from sklearn.model_selection import StratifiedShuffleSplit
 from torchvision import datasets, transforms
 
+from ardg.utils.data import normalize_dataset_name
 
 def _load_targets(dataset: str, data_dir: Path) -> Tuple[np.ndarray, np.ndarray]:
     """Download dataset targets for stratified splitting."""
-    name = dataset.lower()
+    name = normalize_dataset_name(dataset)
     if name == "cifar10":
         ds = datasets.CIFAR10(root=data_dir, train=True, download=True, transform=transforms.ToTensor())
     elif name == "cifar100":
         ds = datasets.CIFAR100(root=data_dir, train=True, download=True, transform=transforms.ToTensor())
+    elif name == "mnist":
+        ds = datasets.MNIST(root=data_dir, train=True, download=True, transform=transforms.ToTensor())
+    elif name == "fashion-mnist":
+        ds = datasets.FashionMNIST(root=data_dir, train=True, download=True, transform=transforms.ToTensor())
+    elif name == "color-mnist":
+        ds = datasets.MNIST(root=data_dir, train=True, download=True, transform=transforms.ToTensor())
     else:
         raise ValueError(f"Unsupported dataset for splitting: {dataset}")
     targets = np.array(ds.targets)

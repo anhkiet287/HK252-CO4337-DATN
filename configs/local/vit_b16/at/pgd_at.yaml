@@ -1,0 +1,55 @@
+experiment:
+  seed: 42
+  device: cuda
+  precision: fp16
+  deterministic: true
+dataset:
+  name: cifar10
+  data_dir: data
+  val_ratio: 0.02
+  num_workers: 8
+  augmentation: standard
+model:
+  name: vit_b16_cifar
+  num_classes: 10
+  pretrained: false
+train:
+  mode: pgd_at
+  epochs: 100
+  batch_size: 256
+  log_interval: 50
+  optimizer:
+    name: sgd
+    lr: 0.1
+    momentum: 0.9
+    weight_decay: 0.0005
+  scheduler:
+    name: cosine
+    t_max: 100
+    eta_min: 0.0
+attack:
+  train:
+    name: pgd
+    eps: 0.0313725
+    step_size: 0.007843
+    num_steps: 7
+  val:
+    name: pgd
+    eps: 0.0313725
+    step_size: 0.007843
+    num_steps: 20
+  eval:
+    name: attack_suite
+    eps: 0.0313725
+    step_size: 0.007843
+    num_steps: 20
+  autoattack:
+    enabled: true
+    eps: 0.0313725
+logging:
+  wandb:
+    enabled: true
+    project: ardg
+    entity: ''
+  run_name: vit_b16_local_pgd_at
+  output_dir: outputs/local

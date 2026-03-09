@@ -1,0 +1,101 @@
+experiment:
+  seed: 42
+  device: cuda
+  precision: fp32
+  deterministic: true
+
+dataset:
+  name: cifar10
+  data_dir: data
+  val_ratio: 0.02
+  num_workers: 8
+  augmentation: standard
+
+model:
+  name: resnet50_cifar
+  num_classes: 10
+
+train:
+  mode: erm
+
+eval:
+  batch_size: 128
+
+attack:
+  eval_suite:
+    max_batches: 0
+    attacks:
+      - label: fgsm
+        type: fgsm
+        eps: 0.0313725
+      - label: fgsm_rs
+        type: fgsm_rs
+        eps: 0.0313725
+        alpha: 0.0313725
+        random_start: true
+      - label: pgd10_ce
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 10
+        restarts: 1
+        loss: ce
+        random_start: true
+      - label: pgd10_dlr
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 10
+        restarts: 1
+        loss: dlr
+        random_start: true
+      - label: pgd20_ce
+        type: pgd
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 20
+        restarts: 5
+        loss: ce
+        random_start: true
+      - label: cw
+        type: cw
+        c: 1.0
+        kappa: 0.0
+        num_steps: 50
+        lr: 0.01
+      - label: deepfool
+        type: deepfool
+        num_steps: 50
+        overshoot: 0.02
+      - label: fab
+        type: fab
+        norm: Linf
+        eps: 0.0313725
+        num_steps: 10
+        restarts: 1
+        n_classes: 10
+        verbose: false
+      - label: square
+        type: square
+        norm: Linf
+        eps: 0.0313725
+        n_queries: 1000
+        restarts: 1
+        verbose: false
+      - label: autoattack
+        type: autoattack
+        norm: Linf
+        eps: 0.0313725
+        version: standard
+        n_classes: 10
+        verbose: false
+
+logging:
+  wandb:
+    enabled: true
+    project: ardg
+    entity: ''
+    group_template: "{model}/{stage}"
+    add_default_tags: true
+  run_name: resnet50_local_eval_all_attacks
+  output_dir: outputs
