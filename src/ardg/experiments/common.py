@@ -11,7 +11,12 @@ from ardg.data.datasets import get_dataloaders
 from ardg.evaluation.evaluator import evaluate_clean
 from ardg.models.factory import build_model
 from ardg.utils.logging import init_wandb, log_metrics, setup_logging
-from ardg.utils.paths import default_output_dir, ensure_dir, get_run_dir
+from ardg.utils.paths import (
+    default_output_dir,
+    ensure_dir,
+    get_run_dir,
+    platform_workspace_root,
+)
 from ardg.utils.seed import set_seed
 
 
@@ -32,11 +37,31 @@ def _resolve_device(requested: str, logger: Any) -> str:
     return device
 
 
+def load_runtime_config(
+    cfg_path: str,
+    platform_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Load config and apply runtime-only platform path overrides."""
+    cfg = load_config(cfg_path)
+    platform = resolve_platform(platform_override or cfg.get("experiment", {}).get("platform"))
+    cfg.setdefault("experiment", {})["platform"] = platform
+
+    logging_cfg = cfg.setdefault("logging", {})
+    if platform_override:
+        workspace_root = platform_workspace_root(platform)
+        cfg.setdefault("dataset", {})["data_dir"] = str(workspace_root / "data")
+        logging_cfg["output_dir"] = str(workspace_root / "outputs")
+    elif str(logging_cfg.get("output_dir", "")).strip() == "":
+        logging_cfg["output_dir"] = default_output_dir(cfg)
+    return cfg
+
+
 def setup_run(
     cfg_path: str,
     run_name_suffix: Optional[str] = None,
     wandb_run_id: Optional[str] = None,
     wandb_resume: Optional[str] = None,
+    platform_override: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], Any, Any, str]:
     """Load config and initialize run essentials.
 
@@ -45,16 +70,12 @@ def setup_run(
         run_name_suffix: Optional suffix to append to logging.run_name (e.g., "eval").
         wandb_run_id: Optional W&B run id to resume.
         wandb_resume: Optional W&B resume mode ("allow"/"must"/"never").
+        platform_override: Optional runtime platform override for data/output roots.
 
     Returns:
         Tuple of (cfg, logger, wandb_run, device).
     """
-    cfg = load_config(cfg_path)
-    platform = resolve_platform(cfg.get("experiment", {}).get("platform"))
-    cfg.setdefault("experiment", {})["platform"] = platform
-    logging_cfg = cfg.setdefault("logging", {})
-    if str(logging_cfg.get("output_dir", "")).strip() == "":
-        logging_cfg["output_dir"] = default_output_dir(cfg)
+    cfg = load_runtime_config(cfg_path, platform_override=platform_override)
     deterministic = cfg.get("experiment", {}).get("deterministic", True)
     set_seed(cfg["experiment"]["seed"], deterministic=deterministic)
 

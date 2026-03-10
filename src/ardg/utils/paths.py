@@ -7,6 +7,8 @@ from ardg.utils.platform import resolve_platform
 
 DEFAULT_LOCAL_OUTPUT_DIR = "outputs"
 DEFAULT_COLAB_OUTPUT_DIR = "/content/drive/MyDrive/ardg/HK252-CO4337-DATN/outputs"
+DEFAULT_LOCAL_CONTENT_ROOT = "/content"
+DEFAULT_COLAB_CONTENT_ROOT = "/content/drive/MyDrive"
 
 
 def default_output_dir(cfg: Dict[str, Any]) -> str:
@@ -15,6 +17,16 @@ def default_output_dir(cfg: Dict[str, Any]) -> str:
     if str(platform).lower() == "colab":
         return DEFAULT_COLAB_OUTPUT_DIR
     return DEFAULT_LOCAL_OUTPUT_DIR
+
+
+def platform_workspace_root(platform: str) -> Path:
+    """Return the expected repository root for a runtime platform override."""
+    repo_name = project_root().name
+    if str(platform).lower() == "colab":
+        return Path(DEFAULT_COLAB_CONTENT_ROOT) / repo_name
+    if str(platform).lower() == "local":
+        return Path(DEFAULT_LOCAL_CONTENT_ROOT) / repo_name
+    return project_root()
 
 
 def project_root() -> Path:

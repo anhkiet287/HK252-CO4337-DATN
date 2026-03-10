@@ -14,7 +14,11 @@ from ardg.attacks.attack_suite import build_eval_suite
 from ardg.config import DEFAULT_CONFIG_PATH
 from ardg.evaluation.evaluator import Evaluator
 from ardg.evaluation.summary import summarize_suite
-from ardg.experiments.common import build_loaders, load_model_from_checkpoint, setup_run
+from ardg.experiments.common import (
+    build_loaders,
+    load_model_from_checkpoint,
+    setup_run,
+)
 from ardg.utils.logging import log_metrics
 from ardg.utils.paths import get_run_dir
 from ardg.utils.seed import set_seed
@@ -68,6 +72,15 @@ def parse_args() -> argparse.Namespace:
         "--save-json",
         default=None,
         help="Optional output JSON path. Default: <run_dir>/eval_test_summary.json",
+    )
+    parser.add_argument(
+        "--platform",
+        choices=("local", "colab"),
+        default=None,
+        help=(
+            "Override runtime platform roots. "
+            "local => /content/<repo>/..., colab => /content/drive/MyDrive/<repo>/..."
+        ),
     )
     parser.add_argument(
         "--verbose",
@@ -168,7 +181,11 @@ def _log_attack_comparison_chart(clean: Dict[str, float], robust: Dict[str, Dict
 
 def main() -> None:
     args = parse_args()
-    cfg, logger, run, device = setup_run(args.config, run_name_suffix="eval")
+    cfg, logger, run, device = setup_run(
+        args.config,
+        run_name_suffix="eval",
+        platform_override=args.platform,
+    )
 
     eval_seed = _resolve_eval_seed(cfg, args.seed)
     eval_deterministic = _resolve_eval_deterministic(cfg, args.deterministic)
@@ -214,6 +231,11 @@ def main() -> None:
         print(f"[INFO] max_batches={max_batches}")
         print(f"[INFO] eval_attacks={list(attacks.keys()) if attacks else []}")
         print(f"[INFO] model={cfg.get('model', {}).get('name')} mode={cfg.get('train', {}).get('mode')}")
+        print(
+            f"[INFO] platform={cfg.get('experiment', {}).get('platform')} "
+            f"data_dir={cfg.get('dataset', {}).get('data_dir')} "
+            f"output_dir={cfg.get('logging', {}).get('output_dir')}"
+        )
     for label, attack in attacks.items():
         try:
             attack_start = time.perf_counter()

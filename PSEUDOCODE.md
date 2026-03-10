@@ -3,22 +3,26 @@
 ## 1) High Level (End-to-End)
 
 1. Load config.
-2. Setup run.
+2. Apply runtime platform override when requested.
+   - `--platform local` -> `/content/HK252-CO4337-DATN/...`
+   - `--platform colab` -> `/content/drive/MyDrive/HK252-CO4337-DATN/...`
+   - override `dataset.data_dir` and `logging.output_dir`
+3. Setup run.
    - set seed / deterministic mode
    - resolve device (cuda/cpu)
    - init logger + wandb
-3. Build dataloaders (train/val).
-4. Build model.
-5. Build objective from `train.mode`.
+4. Build dataloaders (train/val).
+5. Build model.
+6. Build objective from `train.mode`.
    - `erm` / `pgd_at` / `multi_attack_erm` / `rex` / `groupdro` / `groupdro_plus`
-6. Create trainer.
-7. For each epoch:
+7. Create trainer.
+8. For each epoch:
    - `train_one_epoch()` -> logs `train/loss_{clean|adv}`, `train/acc_{clean|adv}`, `optim/lr`
    - `validate()` -> uses Evaluator + `summarize_suite` (uses `attack.val_suite` when present; defaults to clean+pgd20) → prefixed `val/*` (+ objective extras)
-   - choose/save best checkpoint by selection metric (plus best_worst/best_avg for multi-attack)
+   - choose/save best checkpoint by selection metric (plus best_worst/best_avg for `multi_attack_erm` and `groupdro`)
    - save last checkpoint
    - scheduler step
-8. Finish and return checkpoint paths (`best.pt`, `last.pt`).
+9. Finish and return checkpoint paths (`best.pt`, `last.pt`).
 
 Implementation in repo:
 - CLI + orchestration: `scripts/train.py:main`
@@ -145,18 +149,29 @@ Implementation in repo:
 ### GroupDRO
 ```text
 preprocess_batch:
-  optional adversarial preprocessing if enabled
+  require strategy = all_domains
+  build one attacked batch per fixed train domain from the same clean batch
+  group = domain
 
 loss:
-  compute loss per group: loss_g
+  compute per-domain loss and acc: loss_g, acc_g
   update q:
-    q_g <- q_g * exp(eta * loss_g)
+    q_g <- q_g * exp(eta_q * detach(loss_g))
     normalize q
   total_loss = sum(q_g * loss_g)
-metrics: loss/acc + loss_clean/acc_clean (or _adv if attack enabled)
+
+state:
+  save/load q through objective.state_dict()
+
+metrics:
+  train/loss_<group>, train/acc_<group>
+  train/q_<group>, train/q_entropy
+  train/avg_group_loss, train/worst_group_by_loss
+  validation stays suite-based via Evaluator + summarize_suite
 ```
 Implementation in repo:
 - `src/ardg/training/objectives/groupdro.py` (`GroupDRO`)
+- `src/ardg/training/objectives/groupdro_state.py` (`DomainWeightState`)
 
 ### GroupDRO++
 ```text
@@ -198,7 +213,7 @@ metrics:
 Implementation in repo:
 - `src/ardg/training/objectives/rex.py` (`REx`)
 
-## 5) Checkpoint Selection (Multi-Attack)
+## 5) Checkpoint Selection
 
 ```text
 input: val_metrics
@@ -206,7 +221,9 @@ input: val_metrics
 selection_names = train.selection.vector or ["val/acc_worst","val/acc_avg","val/acc_clean"]
 vector = [val_metrics_prefixed[name] for name in selection_names]
 is_better: lexicographic compare(candidate_vector, best_vector, eps=1e-6)
-multi-attack additionally saves best_worst.pt (val/acc_worst) and best_avg.pt (val/acc_avg) when available
+multi-attack/groupdro additionally save:
+  best_worst.pt (val/acc_worst)
+  best_avg.pt   (val/acc_avg)
 ```
 
 Implementation in repo:
@@ -217,23 +234,24 @@ Implementation in repo:
 ## 1) High Level (End-to-End)
 
 1. Parse CLI args (`--config`, `--checkpoint`, `--deterministic`, `--seed`, etc.).
-2. Setup run with eval suffix (`run_name + "_eval"`).
-3. Resolve deterministic settings:
+2. Apply runtime platform override when requested (`--platform`).
+3. Setup run with eval suffix (`run_name + "_eval"`).
+4. Resolve deterministic settings:
    - seed from CLI or config
    - deterministic from CLI or config
-4. Apply dataloader/runtime overrides:
+5. Apply dataloader/runtime overrides:
    - `num_workers`
    - `max_test_samples`
    - smoke mode (`--smoke-one-sample`)
-5. Resolve checkpoint path:
+6. Resolve checkpoint path:
    - explicit `--checkpoint`, else try `best.pt`, then `last.pt`.
-6. Build model and load checkpoint weights.
-7. Build test loader.
-8. Build evaluation attack suite from config (`attack.eval_suite`).
-9. Run clean evaluation.
-10. Run adversarial evaluation for each attack in suite.
-11. Aggregate summary metrics and log to console + wandb.
-12. Save JSON report (`eval_test_summary.json` or `--save-json`).
+7. Build model and load checkpoint weights.
+8. Build test loader.
+9. Build evaluation attack suite from config (`attack.eval_suite`).
+10. Run clean evaluation.
+11. Run adversarial evaluation for each attack in suite.
+12. Aggregate summary metrics and log to console + wandb.
+13. Save JSON report (`eval_test_summary.json` or `--save-json`).
 
 Implementation in repo:
 - CLI + orchestration: `scripts/evaluate.py:main`
@@ -246,7 +264,11 @@ Implementation in repo:
 ```text
 evaluate_main():
   args = parse_args()
-  cfg, logger, run, device = setup_run(config, run_name_suffix="eval")
+  cfg, logger, run, device = setup_run(
+    config,
+    run_name_suffix="eval",
+    platform_override=args.platform,
+  )
 
   eval_seed = resolve_seed(cfg, args.seed)
   eval_det = resolve_deterministic(cfg, args.deterministic)
@@ -359,7 +381,7 @@ Must keep fixed across model comparisons:
 Implementation in repo:
 - Seed/determinism utility: `src/ardg/utils/seed.py` (`set_seed`)
 - Eval deterministic overrides: `scripts/evaluate.py`
-- Train deterministic setup: `src/ardg/experiments/common.py` (`setup_run`)
+- Train deterministic setup + runtime path override: `src/ardg/experiments/common.py` (`load_runtime_config`, `setup_run`)
 
 ## 6) Evaluation Outputs
 

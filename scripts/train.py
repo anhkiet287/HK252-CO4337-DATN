@@ -10,8 +10,8 @@ from typing import Optional
 
 import torch
 
-from ardg.config import DEFAULT_CONFIG_PATH, load_config
-from ardg.experiments.common import build_loaders, setup_run
+from ardg.config import DEFAULT_CONFIG_PATH
+from ardg.experiments.common import build_loaders, load_runtime_config, setup_run
 from ardg.models.factory import build_model
 from ardg.training.trainer import Trainer
 from ardg.utils.paths import get_run_dir
@@ -37,6 +37,15 @@ def parse_args() -> argparse.Namespace:
         help="Optional W&B run id to resume into (useful for legacy checkpoints).",
     )
     parser.add_argument(
+        "--platform",
+        choices=("local", "colab"),
+        default=None,
+        help=(
+            "Override runtime platform roots. "
+            "local => /content/<repo>/..., colab => /content/drive/MyDrive/<repo>/..."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Print resolved config summary before training starts.",
@@ -44,13 +53,18 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _resolve_resume_checkpoint(cfg_path: str, resume: bool, checkpoint: Optional[str]) -> Optional[str]:
+def _resolve_resume_checkpoint(
+    cfg_path: str,
+    resume: bool,
+    checkpoint: Optional[str],
+    platform_override: Optional[str],
+) -> Optional[str]:
     if checkpoint:
         return checkpoint
     if not resume:
         return None
 
-    cfg = load_config(cfg_path)
+    cfg = load_runtime_config(cfg_path, platform_override=platform_override)
     run_dir = Path(get_run_dir(cfg))
     for candidate in (run_dir / "last.pt", run_dir / "best.pt"):
         if candidate.exists():
@@ -94,13 +108,19 @@ def main() -> None:
     """
     # Parsing arguments and loading config.
     args = parse_args()
-    resume_ckpt = _resolve_resume_checkpoint(args.config, args.resume, args.checkpoint)
+    resume_ckpt = _resolve_resume_checkpoint(
+        args.config,
+        args.resume,
+        args.checkpoint,
+        args.platform,
+    )
     resume_run_id = args.wandb_run_id or _extract_wandb_run_id(resume_ckpt)
     resume_mode = "must" if resume_run_id else None
     cfg, logger, _, device = setup_run(
         args.config,
         wandb_run_id=resume_run_id,
         wandb_resume=resume_mode,
+        platform_override=args.platform,
     )
     if resume_ckpt and not resume_run_id:
         logger.warning(
@@ -126,6 +146,12 @@ def main() -> None:
             ds_cfg.get("augmentation"),
             ds_cfg.get("num_workers"),
             ds_cfg.get("val_ratio"),
+        )
+        logger.info(
+            "Paths: platform=%s data_dir=%s output_dir=%s",
+            cfg.get("experiment", {}).get("platform"),
+            ds_cfg.get("data_dir"),
+            cfg.get("logging", {}).get("output_dir"),
         )
         if train_cfg.get("mode") == "multi_attack_erm":
             ma_cfg = train_cfg.get("multi_attack", {})
