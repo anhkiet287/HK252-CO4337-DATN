@@ -145,11 +145,25 @@ class Trainer:
             train_metrics = self.train_one_epoch(epoch) # loss, acc, lr
             train_metrics["time_sec"] = time.perf_counter() - start # compute time
             train_metrics["device"] = str(self.device)
-            log_metrics(self.logger, train_metrics, self.global_step, "train")
+            log_metrics(
+                self.logger,
+                train_metrics,
+                self.global_step,
+                "train",
+                epoch=epoch,
+                log_by_epoch=True,
+            )
 
             val_metrics = self.validate(epoch) # prefixed val metrics
             val_metrics["device"] = str(self.device)
-            log_metrics(self.logger, {k.replace("val/", ""): v for k, v in val_metrics.items()}, self.global_step, "val")
+            log_metrics(
+                self.logger,
+                {k.replace("val/", ""): v for k, v in val_metrics.items()},
+                self.global_step,
+                "val",
+                epoch=epoch,
+                log_by_epoch=True,
+            )
             val_acc = float(val_metrics.get("val/acc_clean", val_metrics.get("val/acc", 0.0))) # cache val acc for select best model 
             selection_names = _resolve_selection_names(self.cfg, val_metrics)
             ckpt_vector = tuple(float(val_metrics.get(n, float("-inf"))) for n in selection_names)
@@ -196,6 +210,8 @@ class Trainer:
                     },
                     self.global_step,
                     "best",
+                    epoch=epoch,
+                    log_by_epoch=True,
                 )
 
             last_ckpt_path = self._save_checkpoint(

@@ -50,7 +50,7 @@ def init_wandb(cfg: Dict[str, Any]) -> Optional[Any]:
     if run_id and resume is None:
         resume = "allow"
 
-    return wandb.init(
+    run = wandb.init(
         project=wandb_cfg.get("project"),
         entity=wandb_cfg.get("entity") or None,
         name=cfg.get("logging", {}).get("run_name"),
@@ -58,9 +58,24 @@ def init_wandb(cfg: Dict[str, Any]) -> Optional[Any]:
         id=run_id,
         resume=resume,
     )
+    if run is not None:
+        try:
+            run.define_metric("epoch")
+            run.define_metric("epoch/*", step_metric="epoch")
+        except Exception:
+            pass
+    return run
 
 
-def log_metrics(logger: logging.Logger, metrics: Dict[str, float], step: int, split: str) -> None:
+def log_metrics(
+    logger: logging.Logger,
+    metrics: Dict[str, Any],
+    step: int,
+    split: str,
+    *,
+    epoch: Optional[int] = None,
+    log_by_epoch: bool = False,
+) -> None:
     """Log metrics to console and wandb.
 
     Args:
@@ -68,6 +83,8 @@ def log_metrics(logger: logging.Logger, metrics: Dict[str, float], step: int, sp
         metrics: Metric values such as loss, acc_clean, acc_pgd.
         step: Global step or epoch index.
         split: Split name (train/val/test).
+        epoch: Optional epoch index for additional epoch-based W&B logging.
+        log_by_epoch: Whether to also emit ``epoch/...`` metrics tied to ``epoch``.
 
     Side effects:
         Logs metrics to the logger and to wandb if a run is active.
@@ -81,4 +98,8 @@ def log_metrics(logger: logging.Logger, metrics: Dict[str, float], step: int, sp
         return
 
     if getattr(wandb, "run", None) is not None:
-        wandb.log(prefixed, step=step)
+        payload: Dict[str, Any] = dict(prefixed)
+        if log_by_epoch and epoch is not None:
+            payload["epoch"] = int(epoch)
+            payload.update({f"epoch/{split}/{key}": value for key, value in metrics.items()})
+        wandb.log(payload, step=step)
