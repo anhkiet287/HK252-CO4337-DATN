@@ -36,9 +36,80 @@ def build_pgd_attack(cfg: Dict[str, Any], model: "nn.Module") -> Any:
     random_start = bool(cfg.get("random_start", True))
     dataset_name = cfg.get("dataset_name", "cifar10")
     loss_name = str(cfg.get("loss", "ce")).lower()
+    norm_name = str(cfg.get("norm", "Linf")).lower()
     torchattacks = require_torchattacks()
     if loss_name not in {"ce", "dlr"}:
         raise ValueError(f"Unsupported PGD loss: {loss_name!r}. Use 'ce' or 'dlr'.")
+    if norm_name in {"l2", "2"}:
+        from torchattacks.attack import Attack
+
+        class _L2PGD(Attack):
+            def __init__(self) -> None:
+                super().__init__("L2PGD", model)
+                self.eps = eps
+                self.alpha = alpha
+                self.steps = steps
+                self.restarts = restarts
+                self.random_start = random_start
+                self.loss_type = loss_name
+                self.eps_for_division = float(cfg.get("eps_for_division", 1e-10))
+
+            def _per_sample_loss(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+                if self.loss_type == "dlr":
+                    return _dlr_loss_per_sample(logits, labels)
+                return F.cross_entropy(logits, labels, reduction="none")
+
+            def _run_once(self, images: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+                adv_images = images.clone().detach()
+                batch_size = len(images)
+
+                if self.random_start:
+                    delta = torch.empty_like(adv_images).normal_()
+                    d_flat = delta.view(batch_size, -1)
+                    n = d_flat.norm(p=2, dim=1).view(batch_size, 1, 1, 1)
+                    r = torch.zeros_like(n).uniform_(0, 1)
+                    delta *= r / (n + self.eps_for_division) * self.eps
+                    adv_images = torch.clamp(adv_images + delta, min=0, max=1).detach()
+
+                for _ in range(self.steps):
+                    adv_images.requires_grad = True
+                    logits = self.get_logits(adv_images)
+                    cost = self._per_sample_loss(logits, labels).sum()
+                    grad = torch.autograd.grad(cost, adv_images, retain_graph=False, create_graph=False)[0]
+                    grad_norms = torch.norm(grad.view(batch_size, -1), p=2, dim=1) + self.eps_for_division
+                    grad = grad / grad_norms.view(batch_size, 1, 1, 1)
+                    adv_images = adv_images.detach() + self.alpha * grad
+
+                    delta = adv_images - images
+                    delta_norms = torch.norm(delta.view(batch_size, -1), p=2, dim=1) + self.eps_for_division
+                    factor = torch.minimum(self.eps / delta_norms, torch.ones_like(delta_norms))
+                    delta = delta * factor.view(-1, 1, 1, 1)
+                    adv_images = torch.clamp(images + delta, min=0, max=1).detach()
+
+                return adv_images
+
+            def forward(self, images: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+                images = images.clone().detach().to(self.device)
+                labels = labels.clone().detach().to(self.device)
+
+                best_adv = images.detach().clone()
+                best_loss = torch.full((images.size(0),), float("-inf"), device=images.device)
+                for _ in range(self.restarts):
+                    adv_images = self._run_once(images, labels)
+                    with torch.no_grad():
+                        logits = self.get_logits(adv_images)
+                        per_sample = self._per_sample_loss(logits, labels)
+                    better = per_sample > best_loss
+                    best_loss = torch.where(better, per_sample, best_loss)
+                    best_adv = torch.where(better.view(-1, 1, 1, 1), adv_images, best_adv)
+                return best_adv
+
+        attack = _L2PGD()
+        return configure_normalization(attack, dataset_name)
+
+    if norm_name not in {"linf", "inf"}:
+        raise ValueError(f"Unsupported PGD norm: {norm_name!r}. Use 'Linf' or 'L2'.")
+
     if loss_name == "ce":
         attack = torchattacks.PGD(
             model,

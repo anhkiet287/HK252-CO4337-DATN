@@ -5,6 +5,8 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchattacks")
 
+from ardg.attacks.pgd import build_pgd_attack
+from ardg.data.transforms import get_dataset_stats
 import ardg.training.objectives.multi_attack_erm as multi_attack_module
 from ardg.training.objectives.groupdro import GroupDRO
 from ardg.training.objectives.groupdro_state import (
@@ -72,9 +74,15 @@ def _fake_build_attack(spec: dict, model: torch.nn.Module, dataset_name: str, sh
     offsets = {
         "clean": 0.0,
         "fgsm_rs": 0.1,
+        "fgsm_rs_linf": 0.1,
         "pgd_ce": 0.2,
+        "pgd_ce_linf": 0.2,
+        "pgd_ce_l2": 0.25,
         "pgd_dlr": 0.3,
+        "pgd_dlr_linf": 0.3,
+        "pgd_dlr_l2": 0.35,
         "cw_l2": 0.4,
+        "deepfool_l2": 0.45,
     }
     name = str(spec.get("name", spec.get("label", spec.get("type", "clean"))))
     offset = float(offsets[name])
@@ -210,6 +218,30 @@ def test_groupdro_accepts_cw_train_domain(monkeypatch: pytest.MonkeyPatch) -> No
     assert len(out["x_domains"]) == 3
 
 
+def test_groupdro_accepts_mixed_norm_and_deepfool_train_domains(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
+
+    cfg = _make_groupdro_cfg()
+    cfg["attack"]["train_domains"] = [
+        {"label": "pgd_ce_linf", "type": "pgd", "norm": "Linf", "eps": 8.0 / 255.0, "step_size": 2.0 / 255.0, "num_steps": 2, "loss": "ce"},
+        {"label": "pgd_ce_l2", "type": "pgd", "norm": "L2", "eps": 1.0, "step_size": 0.2, "num_steps": 2, "loss": "ce"},
+        {"label": "deepfool_l2", "type": "deepfool", "num_steps": 5, "overshoot": 0.02},
+        {"label": "cw_l2", "type": "cw", "steps": 5, "lr": 0.01},
+    ]
+
+    model = TinyModel()
+    objective = GroupDRO(cfg, model)
+    batch = {
+        "x": torch.randn(4, 3, 4, 4),
+        "y": torch.tensor([0, 1, 0, 1], dtype=torch.long),
+    }
+
+    out = objective.preprocess_batch(batch, model)
+
+    assert out["domain_names"] == ["clean", "pgd_ce_linf", "pgd_ce_l2", "deepfool_l2", "cw_l2"]
+    assert len(out["x_domains"]) == 5
+
+
 def test_groupdro_tracks_worst_group_by_loss_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
 
@@ -265,3 +297,33 @@ def test_groupdro_rejects_invalid_worst_group_mode(monkeypatch: pytest.MonkeyPat
 
     with pytest.raises(ValueError, match="worst_group_by"):
         GroupDRO(cfg, TinyModel())
+
+
+def test_build_pgd_attack_supports_l2_dlr() -> None:
+    model = TinyModel().eval()
+    attack = build_pgd_attack(
+        {
+            "dataset_name": "cifar10",
+            "norm": "L2",
+            "eps": 1.0,
+            "step_size": 0.2,
+            "num_steps": 2,
+            "restarts": 1,
+            "loss": "dlr",
+            "random_start": True,
+        },
+        model,
+    )
+
+    images = torch.rand(2, 3, 4, 4)
+    mean, std = get_dataset_stats("cifar10")
+    mean_t = torch.tensor(mean, dtype=images.dtype).view(1, 3, 1, 1)
+    std_t = torch.tensor(std, dtype=images.dtype).view(1, 3, 1, 1)
+    images_norm = (images - mean_t) / std_t
+    labels = torch.tensor([0, 1], dtype=torch.long)
+    adv_norm = attack(images_norm, labels)
+    adv = adv_norm * std_t + mean_t
+
+    assert adv.shape == images.shape
+    delta_norm = (adv - images).view(images.size(0), -1).norm(p=2, dim=1)
+    assert torch.all(delta_norm <= 1.0 + 1e-4)

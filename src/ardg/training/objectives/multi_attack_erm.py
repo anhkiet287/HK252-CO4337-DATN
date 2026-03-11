@@ -12,7 +12,9 @@ from ardg.training.losses import compute_loss
 from ardg.training.objectives.base import Objective
 from ardg.utils.batch import as_xy_dict
 
-SUPPORTED_DOMAIN_TYPES = {"clean", "fgsm", "fgsm_rs", "pgd", "pgd_ce", "pgd_dlr", "cw"}
+SUPPORTED_DOMAIN_TYPES = {"clean", "fgsm", "fgsm_rs", "pgd", "pgd_ce", "pgd_dlr", "cw", "deepfool"}
+_SHARED_EPS_TYPES = {"fgsm", "fgsm_rs", "pgd", "pgd_ce", "pgd_dlr"}
+_SHARED_NORM_TYPES = {"fgsm", "fgsm_rs", "pgd", "pgd_ce", "pgd_dlr"}
 
 
 def _float_close(a: float, b: float, tol: float = 1e-12) -> bool:
@@ -43,33 +45,28 @@ def resolve_multi_attack_train_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _infer_shared_threat_model(raw_domains: Sequence[Dict[str, Any]]) -> Tuple[str | None, float | None]:
-    shared_norm: str | None = None
-    shared_eps: float | None = None
+    eps_values: List[float] = []
+    norm_values: List[str] = []
     for raw in raw_domains:
         if not isinstance(raw, dict):
             raise ValueError(f"Each train domain must be a mapping, got: {type(raw)!r}")
         domain_type = str(raw.get("type", raw.get("name", raw.get("label", "")))).strip().lower()
         if domain_type == "clean":
             continue
-        eps = raw.get("eps")
+        eps = raw.get("eps") if domain_type in _SHARED_EPS_TYPES else None
         if eps is not None:
-            eps_value = float(eps)
-            if shared_eps is None:
-                shared_eps = eps_value
-            elif not _float_close(shared_eps, eps_value):
-                raise ValueError(
-                    f"attack.train_domains must share one threat model, but found eps={shared_eps} and eps={eps_value}."
-                )
-        norm = raw.get("norm")
+            eps_values.append(float(eps))
+        norm = raw.get("norm") if domain_type in _SHARED_NORM_TYPES else None
         if norm is not None:
-            norm_value = str(norm)
-            if shared_norm is None:
-                shared_norm = norm_value
-            elif norm_value.lower() != shared_norm.lower():
-                raise ValueError(
-                    "attack.train_domains must share one threat model, "
-                    f"but found norm={shared_norm!r} and norm={norm_value!r}."
-                )
+            norm_values.append(str(norm))
+
+    shared_eps: float | None = None
+    if eps_values and all(_float_close(eps_values[0], value) for value in eps_values[1:]):
+        shared_eps = eps_values[0]
+
+    shared_norm: str | None = None
+    if norm_values and all(value.lower() == norm_values[0].lower() for value in norm_values[1:]):
+        shared_norm = norm_values[0]
     if shared_norm is None and shared_eps is not None:
         shared_norm = "Linf"
     return shared_norm, shared_eps
@@ -104,7 +101,7 @@ def _normalize_domain_specs(
         if not domain_name:
             raise ValueError(f"Invalid empty domain name in spec: {raw}")
 
-        if domain_type != "clean" and shared_eps is not None:
+        if domain_type in _SHARED_EPS_TYPES and shared_eps is not None:
             eps_override = domain.get("eps")
             if eps_override is not None and not _float_close(float(eps_override), shared_eps):
                 raise ValueError(
@@ -112,7 +109,7 @@ def _normalize_domain_specs(
                 )
             domain.setdefault("eps", float(shared_eps))
 
-        if domain_type != "clean" and shared_norm is not None:
+        if domain_type in _SHARED_NORM_TYPES and shared_norm is not None:
             norm_override = domain.get("norm")
             if norm_override is not None and str(norm_override).lower() != shared_norm.lower():
                 raise ValueError(
