@@ -24,6 +24,24 @@ class TinyModel(torch.nn.Module):
         return torch.cat([flat, -flat], dim=1)
 
 
+class DomainAwareModel(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.bias = torch.nn.Parameter(torch.tensor(0.0))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        offset = float(x.mean().item())
+        if offset < 0.05:
+            logits = torch.tensor([[0.0, 0.1], [0.1, 0.0]], dtype=torch.float32, device=x.device)
+        elif offset < 0.15:
+            logits = torch.tensor([[3.0, 0.0], [0.0, 3.0]], dtype=torch.float32, device=x.device)
+        elif offset < 0.25:
+            logits = torch.tensor([[3.0, 0.0], [3.0, 0.0]], dtype=torch.float32, device=x.device)
+        else:
+            logits = torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32, device=x.device)
+        return logits + self.bias
+
+
 def _make_groupdro_cfg() -> dict:
     return {
         "experiment": {"seed": 42},
@@ -56,6 +74,7 @@ def _fake_build_attack(spec: dict, model: torch.nn.Module, dataset_name: str, sh
         "fgsm_rs": 0.1,
         "pgd_ce": 0.2,
         "pgd_dlr": 0.3,
+        "cw_l2": 0.4,
     }
     name = str(spec.get("name", spec.get("label", spec.get("type", "clean"))))
     offset = float(offsets[name])
@@ -135,6 +154,7 @@ def test_objective_state_dict_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None
     model = TinyModel()
     objective = GroupDRO(_make_groupdro_cfg(), model)
     objective.q_state.set_q(torch.tensor([0.1, 0.2, 0.3, 0.4], dtype=torch.float32))
+    objective.normalized_loss_state.set_ema_losses(torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32))
 
     clone = GroupDRO(_make_groupdro_cfg(), TinyModel())
     clone.load_state_dict(objective.state_dict())
@@ -142,3 +162,106 @@ def test_objective_state_dict_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None
     assert clone.q is not None
     assert objective.q is not None
     assert torch.allclose(clone.q, objective.q, atol=1e-6)
+    assert clone.normalized_loss_state.ema_losses is not None
+    assert objective.normalized_loss_state.ema_losses is not None
+    assert torch.allclose(clone.normalized_loss_state.ema_losses, objective.normalized_loss_state.ema_losses, atol=1e-6)
+
+
+def test_groupdro_tracks_worst_group_by_accuracy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
+
+    model = DomainAwareModel()
+    objective = GroupDRO(_make_groupdro_cfg(), model)
+    batch = {
+        "x": torch.zeros(2, 3, 4, 4),
+        "y": torch.tensor([0, 1], dtype=torch.long),
+    }
+
+    processed = objective.preprocess_batch(batch, model)
+    _, metrics = objective.compute_loss(model, processed)
+
+    assert metrics["worst_group"] == "clean"
+    assert metrics["worst_group_mode"] == "acc"
+    assert metrics["worst_group_by_acc"] == "clean"
+    assert metrics["worst_group_by_loss"] == "pgd_ce"
+    assert metrics["loss_pgd_ce"] > metrics["loss_clean"]
+
+
+def test_groupdro_accepts_cw_train_domain(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
+
+    cfg = _make_groupdro_cfg()
+    cfg["attack"]["train_domains"] = [
+        {"label": "clean", "type": "clean"},
+        {"label": "pgd_ce", "type": "pgd", "eps": 8.0 / 255.0, "step_size": 2.0 / 255.0, "num_steps": 2, "loss": "ce"},
+        {"label": "cw_l2", "type": "cw", "steps": 5, "lr": 0.01},
+    ]
+
+    model = TinyModel()
+    objective = GroupDRO(cfg, model)
+    batch = {
+        "x": torch.randn(4, 3, 4, 4),
+        "y": torch.tensor([0, 1, 0, 1], dtype=torch.long),
+    }
+
+    out = objective.preprocess_batch(batch, model)
+
+    assert out["domain_names"] == ["clean", "pgd_ce", "cw_l2"]
+    assert len(out["x_domains"]) == 3
+
+
+def test_groupdro_tracks_worst_group_by_loss_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
+
+    cfg = _make_groupdro_cfg()
+    cfg["train"]["groupdro"]["worst_group_by"] = "loss"
+
+    model = DomainAwareModel()
+    objective = GroupDRO(cfg, model)
+    batch = {
+        "x": torch.zeros(2, 3, 4, 4),
+        "y": torch.tensor([0, 1], dtype=torch.long),
+    }
+
+    processed = objective.preprocess_batch(batch, model)
+    _, metrics = objective.compute_loss(model, processed)
+
+    assert metrics["worst_group"] == "pgd_ce"
+    assert metrics["worst_group_mode"] == "loss"
+    assert metrics["worst_group_by_acc"] == "clean"
+    assert metrics["worst_group_by_loss"] == "pgd_ce"
+
+
+def test_groupdro_tracks_worst_group_by_normalized_loss_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
+
+    cfg = _make_groupdro_cfg()
+    cfg["train"]["groupdro"]["worst_group_by"] = "normalized_loss"
+
+    model = DomainAwareModel()
+    objective = GroupDRO(cfg, model)
+    objective.normalized_loss_state.set_ema_losses(torch.tensor([0.1, 10.0, 10.0, 10.0], dtype=torch.float32))
+    batch = {
+        "x": torch.zeros(2, 3, 4, 4),
+        "y": torch.tensor([0, 1], dtype=torch.long),
+    }
+
+    processed = objective.preprocess_batch(batch, model)
+    _, metrics = objective.compute_loss(model, processed)
+
+    assert metrics["worst_group"] == "clean"
+    assert metrics["worst_group_mode"] == "normalized_loss"
+    assert metrics["worst_group_by_acc"] == "clean"
+    assert metrics["worst_group_by_loss"] == "pgd_ce"
+    assert metrics["worst_group_by_normalized_loss"] == "clean"
+    assert metrics["normalized_loss_clean"] > metrics["normalized_loss_pgd_ce"]
+
+
+def test_groupdro_rejects_invalid_worst_group_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
+
+    cfg = _make_groupdro_cfg()
+    cfg["train"]["groupdro"]["worst_group_by"] = "foo"
+
+    with pytest.raises(ValueError, match="worst_group_by"):
+        GroupDRO(cfg, TinyModel())

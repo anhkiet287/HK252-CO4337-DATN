@@ -120,6 +120,7 @@ _train_step(batch):
 ```
 
 Objective hook contract:
+- `on_train_start`
 - `preprocess_batch`
 - `compute_loss`
 - `validate`

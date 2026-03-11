@@ -38,6 +38,7 @@ train:
     eta_q: 0.02
     include_clean: true
     init_q: uniform
+    worst_group_by: acc
     selection_metric: val/acc_worst
 attack:
   train_domains:

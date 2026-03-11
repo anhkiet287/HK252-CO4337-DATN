@@ -8,6 +8,7 @@ import torch
 
 from ardg.training.objectives.multi_attack_erm import AttackDomainObjective
 from ardg.training.objectives.groupdro_state import (
+    DomainLossEMAState,
     DomainWeightState,
     q_entropy,
     weighted_group_loss,
@@ -37,9 +38,22 @@ class GroupDRO(AttackDomainObjective):
 
         self.eta_q = float(gd_cfg.get("eta_q", gd_cfg.get("eta", 0.02)))
         self.init_q = str(gd_cfg.get("init_q", "uniform"))
+        self.worst_group_by = str(gd_cfg.get("worst_group_by", gd_cfg.get("worst_group_mode", "acc"))).lower()
+        if self.worst_group_by not in {"acc", "loss", "normalized_loss"}:
+            raise ValueError(
+                "Unsupported train.groupdro.worst_group_by="
+                f"{self.worst_group_by!r}. Use 'acc', 'loss', or 'normalized_loss'."
+            )
+        self.normalized_loss_ema = float(gd_cfg.get("normalized_loss_ema", 0.9))
+        self.normalized_loss_eps = float(gd_cfg.get("normalized_loss_eps", 1e-8))
 
         # Initialize q_state with the domain names, eta_q, and init_q.
         self.q_state = DomainWeightState(self.domain_names, eta_q=self.eta_q, init_q=self.init_q)
+        self.normalized_loss_state = DomainLossEMAState(
+            self.domain_names,
+            momentum=self.normalized_loss_ema,
+            eps=self.normalized_loss_eps,
+        )
 
     @property
     def q(self) -> torch.Tensor | None:
@@ -49,37 +63,27 @@ class GroupDRO(AttackDomainObjective):
         return self.build_all_domains_batch(batch, model)
 
     def compute_loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, Any]]:
-        data = as_xy_dict(batch) # Ensure data is in dict format with "x" and "y" keys, shape (batch_size, ...).
-        # for example: cifar10, batch size 64, x shape [64,3,32,32], y shape [64] then
-        # x: (batch_size, ...) tensor of input features, [64,3,32,32] .
-        # y: (batch_size, ...) tensor of labels, e.g [64]
-
-        # If x_domains is not already in the batch, build it using the model and the input data.
-        # however for groupdro we expect x_domains as default as all domain strategy is used.
+        data = as_xy_dict(batch)
         if "x_domains" not in data:
             data = self.build_all_domains_batch(data, model)
 
-        labels = data["y"] # shape [64]
-        batch_size = int(labels.size(0)) # shape () scalar tensor with value 64
-        domain_names = data.get("domain_names", self.domain_names) # list of domain names, e.g. ["clean", "attack1", "attack2"].
+        labels = data["y"]
+        batch_size = int(labels.size(0))
+        domain_names = data.get("domain_names", self.domain_names)
 
-        # Compute losses for each domain and update q weights accordingly.
-        stats = self._compute_all_domain_stats(model, data["x_domains"], labels, domain_names) 
-
-        # stats is a dict with keys:
-        # "domain_losses": tensor of shape [num_domains] with the average loss for each domain, e.g. [0.5, 1.0, 1.5]
-        # "mean_acc": scalar tensor with the mean accuracy across all domains, e.g. 0.75
-        # "avg_group_loss": scalar tensor with the average loss across all domains, e.g. 1.0
-        # "worst_group_by_loss": string with the name of the domain with the highest loss, e.g. "attack2"
-        # "metrics": dict with any additional metrics computed for the batch, e.g. {"acc_clean": 0.8, "acc_attack1": 0.7, "acc_attack2": 0.75}
-        loss_g = stats["domain_losses"] 
-
-        # Update q weights based on the domain losses and compute the total loss as a weighted sum of the domain losses.
-        q = self.q_state.update(loss_g) 
-
-        # Compute the total loss as a weighted sum of the domain losses using the updated q weights.
+        stats = self._compute_all_domain_stats(model, data["x_domains"], labels, domain_names)
+        loss_g = stats["domain_losses"]
+        q = self.q_state.update(loss_g)
         total_loss = weighted_group_loss(q, loss_g)
         mean_acc = stats["mean_acc"]
+        normalized_loss_g = self.normalized_loss_state.normalized(loss_g)
+        if int(normalized_loss_g.numel()) > 0:
+            normalized_worst_idx = int(normalized_loss_g.argmax().item())
+            worst_group_by_normalized_loss = str(domain_names[normalized_worst_idx])
+        else:
+            worst_group_by_normalized_loss = ""
+        stats["worst_group_by_normalized_loss"] = worst_group_by_normalized_loss
+        worst_group = str(stats[f"worst_group_by_{self.worst_group_by}"])
 
         metrics: Dict[str, Any] = {
             "loss": float(total_loss.item()),
@@ -94,27 +98,35 @@ class GroupDRO(AttackDomainObjective):
             "domain_batch_counts": data.get("domain_batch_counts", {}),
             "group_batch_counts": data.get("domain_batch_counts", {}),
             "avg_group_loss": stats["avg_group_loss"],
+            "worst_group": worst_group,
+            "worst_group_mode": self.worst_group_by,
+            "worst_group_by_acc": stats["worst_group_by_acc"],
             "worst_group_by_loss": stats["worst_group_by_loss"],
+            "worst_group_by_normalized_loss": worst_group_by_normalized_loss,
             "q_entropy": float(q_entropy(q).item()),
         }
-        # Add any additional metrics computed for the batch to the metrics dict.
-        metrics.update(stats["metrics"]) 
+        metrics.update(stats["metrics"])
 
-        # Add the current q values for each domain to the metrics dict for logging and analysis.
         for domain_name, q_value in zip(self.domain_names, q.tolist()):
             metrics[f"q_{domain_name}"] = float(q_value)
+        for domain_name, normalized_loss in zip(domain_names, normalized_loss_g.tolist()):
+            metrics[f"normalized_loss_{domain_name}"] = float(normalized_loss)
 
-        # Return the total loss and the metrics dict for logging and analysis.
+        self.normalized_loss_state.update(loss_g)
+
         return total_loss, metrics
 
     def state_dict(self) -> Dict[str, Any]:
         return {
             "q_state": self.q_state.state_dict(),
+            "normalized_loss_state": self.normalized_loss_state.state_dict(),
         }
 
     def load_state_dict(self, state: Dict[str, Any]) -> None:
         if "q_state" in state and isinstance(state["q_state"], dict):
             self.q_state.load_state_dict(state["q_state"])
+            if "normalized_loss_state" in state and isinstance(state["normalized_loss_state"], dict):
+                self.normalized_loss_state.load_state_dict(state["normalized_loss_state"])
             return
         # Backward compatibility with earlier checkpoints that saved {"q": tensor}.
         if "q" in state:

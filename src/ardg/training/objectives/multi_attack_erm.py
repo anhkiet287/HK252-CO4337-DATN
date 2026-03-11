@@ -12,7 +12,7 @@ from ardg.training.losses import compute_loss
 from ardg.training.objectives.base import Objective
 from ardg.utils.batch import as_xy_dict
 
-SUPPORTED_DOMAIN_TYPES = {"clean", "fgsm", "fgsm_rs", "pgd", "pgd_ce", "pgd_dlr"}
+SUPPORTED_DOMAIN_TYPES = {"clean", "fgsm", "fgsm_rs", "pgd", "pgd_ce", "pgd_dlr", "cw"}
 
 
 def _float_close(a: float, b: float, tol: float = 1e-12) -> bool:
@@ -328,6 +328,7 @@ class AttackDomainObjective(Objective):
             worst_group_by_loss = ""
 
         mean_acc = float(sum(acc_values.values()) / max(len(acc_values), 1))
+        worst_group_by_acc = min(acc_values, key=acc_values.get) if acc_values else ""
         return {
             "domain_losses": domain_losses,
             "domain_accs": acc_values,
@@ -335,6 +336,7 @@ class AttackDomainObjective(Objective):
             "mean_acc": mean_acc,
             "avg_group_loss": avg_group_loss,
             "worst_group_by_loss": worst_group_by_loss,
+            "worst_group_by_acc": str(worst_group_by_acc),
         }
 
 

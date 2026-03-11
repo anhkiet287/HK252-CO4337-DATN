@@ -138,6 +138,11 @@ class Trainer:
             return {"last": last_path, "best": best_path}
 
         # training loop
+        try:
+            self.objective.on_train_start({"train": self.train_loader, "val": self.val_loader})
+        except AttributeError:
+            pass
+
         for epoch in range(self.start_epoch, epochs + 1):
             self.logger.info("Starting epoch %s", epoch)
             start = time.perf_counter()
@@ -708,7 +713,14 @@ def _is_numeric_metric(value: Any) -> bool:
 def _should_aggregate_step_metric(name: str, value: Any) -> bool:
     if name in {"loss", "acc", "correct", "batch_size", "optim/lr"}:
         return False
-    if name in {"domain_name", "worst_group_by_loss"}:
+    if name in {
+        "domain_name",
+        "worst_group",
+        "worst_group_mode",
+        "worst_group_by_loss",
+        "worst_group_by_acc",
+        "worst_group_by_normalized_loss",
+    }:
         return False
     if name.endswith("_batch_counts"):
         return False
@@ -726,7 +738,14 @@ def _accumulate_step_metrics(
         if _should_aggregate_step_metric(key, value):
             sums[key] = sums.get(key, 0.0) + float(value) * batch_size
             weights[key] = weights.get(key, 0.0) + batch_size
-        elif key in {"domain_name", "worst_group_by_loss"} and value is not None:
+        elif key in {
+            "domain_name",
+            "worst_group",
+            "worst_group_mode",
+            "worst_group_by_loss",
+            "worst_group_by_acc",
+            "worst_group_by_normalized_loss",
+        } and value is not None:
             latest[key] = value
 
 

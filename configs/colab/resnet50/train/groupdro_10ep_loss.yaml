@@ -18,7 +18,7 @@ model:
 train:
   mode: groupdro
   domain_strategy: all_domains
-  epochs: 100
+  epochs: 10
   batch_size: 64
   log_interval: 50
   selection:
@@ -35,13 +35,13 @@ train:
     weight_decay: 0.0005
   scheduler:
     name: cosine
-    t_max: 100
+    t_max: 10
     eta_min: 0.0
   groupdro:
     eta_q: 0.02
     include_clean: true
     init_q: uniform
-    worst_group_by: acc
+    worst_group_by: loss
     selection_metric: val/acc_worst
 
 attack:
@@ -133,5 +133,5 @@ logging:
     entity: ""
     group_template: "{model}/{stage}"
     add_default_tags: true
-  run_name: resnet50_colab_groupdro
+  run_name: resnet50_colab_groupdro_10ep_loss
   output_dir: /content/HK252-CO4337-DATN/outputs

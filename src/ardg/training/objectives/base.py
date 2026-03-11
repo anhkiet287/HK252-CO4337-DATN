@@ -8,6 +8,10 @@ from typing import Any, Dict, Tuple
 class Objective:
     """Abstract objective used by Trainer."""
 
+    def on_train_start(self, loaders: Dict[str, Any]) -> None:
+        """Optional hook run before the first training epoch."""
+        return None
+
     def preprocess_batch(self, batch: Any, model: Any) -> Any:
         """Optionally modify batch before forward (e.g., PGD adversarial)."""
         return batch
