@@ -1,6 +1,8 @@
 """Logging helpers for console and wandb."""
 
 import logging
+import math
+import numbers
 from typing import Any, Dict, Optional
 
 
@@ -90,7 +92,7 @@ def log_metrics(
         Logs metrics to the logger and to wandb if a run is active.
     """
     prefixed = {f"{split}/{key}": value for key, value in metrics.items()}
-    logger.info("step=%s metrics=%s", step, prefixed)
+    logger.info("step=%s metrics=%s", step, _format_metrics_for_console(prefixed))
 
     try:
         import wandb  # type: ignore
@@ -103,3 +105,21 @@ def log_metrics(
             payload["epoch"] = int(epoch)
             payload.update({f"epoch/{split}/{key}": value for key, value in metrics.items()})
         wandb.log(payload, step=step)
+
+
+def _format_metrics_for_console(metrics: Dict[str, Any], precision: int = 3) -> str:
+    """Render metrics with stable key order and fixed decimal places for numerics."""
+    parts = [f"{key}={_format_metric_value(value, precision)}" for key, value in sorted(metrics.items())]
+    return "{" + ", ".join(parts) + "}"
+
+
+def _format_metric_value(value: Any, precision: int) -> str:
+    """Format one metric value for aligned console logging."""
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, numbers.Real):
+        number = float(value)
+        if math.isfinite(number):
+            return f"{number:.{precision}f}"
+        return str(number)
+    return str(value)
