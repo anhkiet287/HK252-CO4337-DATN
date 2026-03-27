@@ -1,5 +1,6 @@
 """Trainer with pluggable objectives (ERM/PGD/REx/GroupDRO/GroupDRO++)."""
 
+import json
 import logging
 import time
 from pathlib import Path
@@ -17,6 +18,7 @@ from ardg.training.objectives.multi_attack_erm import resolve_multi_attack_train
 from ardg.utils.batch import move_to_device, unpack_xy
 from ardg.utils.logging import log_metrics
 from ardg.utils.paths import ensure_dir, get_run_dir
+from ardg.utils.run_metadata import update_run_manifest
 
 
 class Trainer:
@@ -122,6 +124,7 @@ class Trainer:
         """Run the full training loop."""
         epochs = self.cfg["train"]["epochs"]
         last_ckpt_path = ""
+        completed_epoch = max(self.start_epoch - 1, 0)
 
         # resume previous training if available
         if self.start_epoch > epochs:
@@ -144,6 +147,7 @@ class Trainer:
             pass
 
         for epoch in range(self.start_epoch, epochs + 1):
+            completed_epoch = epoch
             self.logger.info("Starting epoch %s", epoch)
             start = time.perf_counter()
 
@@ -283,6 +287,32 @@ class Trainer:
         if not last_ckpt_path:
             raise RuntimeError("No checkpoint saved during training.")
         best_path = self.best_ckpt_path or last_ckpt_path
+        summary_path = self._write_train_summary(
+            {
+                "epochs_configured": int(epochs),
+                "last_epoch": int(completed_epoch),
+                "best_epoch": int(self.best_epoch),
+                "best_metric": float(self.best_metric),
+                "best_metric_name": str(self.best_metric_name),
+                "global_step": int(self.global_step),
+                "best_checkpoint": best_path,
+                "last_checkpoint": last_ckpt_path,
+                "wandb_run_id": self.wandb_run_id,
+            }
+        )
+        update_run_manifest(
+            get_run_dir(self.cfg),
+            {
+                "training": {
+                    "best_checkpoint": best_path,
+                    "last_checkpoint": last_ckpt_path,
+                    "best_epoch": int(self.best_epoch),
+                    "best_metric": float(self.best_metric),
+                    "best_metric_name": str(self.best_metric_name),
+                    "train_summary_json": summary_path,
+                }
+            },
+        )
         return {"last": last_ckpt_path, "best": best_path}
 
     def load_checkpoint(self, ckpt_path: str) -> Dict[str, Any]:
@@ -552,7 +582,22 @@ class Trainer:
             "wandb_run_id": self.wandb_run_id,
         }
         torch.save(state, ckpt_path)
+        update_run_manifest(
+            run_dir,
+            {
+                "checkpoints": {
+                    name: ckpt_path,
+                }
+            },
+        )
         return ckpt_path
+
+    def _write_train_summary(self, payload: Dict[str, Any]) -> str:
+        run_dir = Path(get_run_dir(self.cfg))
+        ensure_dir(str(run_dir))
+        summary_path = run_dir / "train_summary.json"
+        summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        return str(summary_path)
 
     def _steps_per_epoch(self) -> int:
         full_steps = len(self.train_loader)

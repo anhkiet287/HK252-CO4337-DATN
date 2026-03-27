@@ -1,0 +1,12 @@
+logging:
+  wandb:
+    enabled: true
+    mode: online
+    project: ardg
+    entity: ""
+    group_template: "{model}/{stage}"
+    add_default_tags: true
+    tags: []
+    run_id: null
+    resume: allow
+  run_name: ""

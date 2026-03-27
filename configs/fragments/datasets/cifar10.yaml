@@ -1,0 +1,6 @@
+dataset:
+  name: cifar10
+  data_dir: data
+  val_ratio: 0.02
+  num_workers: 4
+  augmentation: standard

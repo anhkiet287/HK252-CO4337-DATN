@@ -16,11 +16,13 @@ from ardg.evaluation.evaluator import Evaluator
 from ardg.evaluation.summary import summarize_suite
 from ardg.experiments.common import (
     build_loaders,
+    load_runtime_config,
     load_model_from_checkpoint,
     setup_run,
 )
 from ardg.utils.logging import log_metrics
 from ardg.utils.paths import get_run_dir
+from ardg.utils.run_metadata import update_run_manifest
 from ardg.utils.seed import set_seed
 
 
@@ -28,6 +30,11 @@ def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Evaluate a trained model (test split only).")
     parser.add_argument("--config", default=DEFAULT_CONFIG_PATH, help="Path to YAML config.")
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="Optional runtime profile overlay YAML (e.g. configs/profiles/h100.yaml).",
+    )
     parser.add_argument(
         "--checkpoint",
         required=False,
@@ -78,8 +85,8 @@ def parse_args() -> argparse.Namespace:
         choices=("local", "colab"),
         default=None,
         help=(
-            "Override runtime platform roots. "
-            "local => /content/<repo>/..., colab => /content/drive/MyDrive/<repo>/..."
+            "Legacy platform override for runtime roots. "
+            "Prefer --profile for thesis workflows."
         ),
     )
     parser.add_argument(
@@ -181,10 +188,28 @@ def _log_attack_comparison_chart(clean: Dict[str, float], robust: Dict[str, Dict
 
 def main() -> None:
     args = parse_args()
+    preview_cfg = load_runtime_config(
+        args.config,
+        profile_path=args.profile,
+        platform_override=args.platform,
+    )
+    ckpt_path = _resolve_checkpoint(preview_cfg, args.checkpoint)
     cfg, logger, run, device = setup_run(
         args.config,
+        stage="eval",
         run_name_suffix="eval",
+        checkpoint_path=ckpt_path,
+        profile_path=args.profile,
+        require_wandb=True,
         platform_override=args.platform,
+    )
+    update_run_manifest(
+        cfg["_meta"]["run_dir"],
+        {
+            "evaluation": {
+                "checkpoint_path": ckpt_path,
+            }
+        },
     )
 
     eval_seed = _resolve_eval_seed(cfg, args.seed)
@@ -203,7 +228,6 @@ def main() -> None:
     elif args.max_test_samples is not None:
         cfg.setdefault("dataset", {})["max_test_samples"] = max(1, int(args.max_test_samples))
 
-    ckpt_path = _resolve_checkpoint(cfg, args.checkpoint)
     model = load_model_from_checkpoint(cfg, ckpt_path, device)
 
     _, _, test_loader = build_loaders(cfg)
@@ -228,6 +252,8 @@ def main() -> None:
     )
     print(f"[INFO] max_test_samples={cfg.get('dataset', {}).get('max_test_samples', 'full')}")
     if args.verbose:
+        meta = cfg.get("_meta", {}).get("run_metadata", {})
+        print(f"[INFO] run_name={meta.get('run_name')} runtime_profile={meta.get('runtime_profile')}")
         print(f"[INFO] max_batches={max_batches}")
         print(f"[INFO] eval_attacks={list(attacks.keys()) if attacks else []}")
         print(f"[INFO] model={cfg.get('model', {}).get('name')} mode={cfg.get('train', {}).get('mode')}")
@@ -236,6 +262,8 @@ def main() -> None:
             f"data_dir={cfg.get('dataset', {}).get('data_dir')} "
             f"output_dir={cfg.get('logging', {}).get('output_dir')}"
         )
+        print(f"[INFO] config_sources={cfg.get('_meta', {}).get('config_sources')}")
+        print(f"[INFO] resolved_config={cfg.get('_meta', {}).get('resolved_config_path')}")
     for label, attack in attacks.items():
         try:
             attack_start = time.perf_counter()
@@ -295,6 +323,18 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(f"[INFO] saved={out_path}")
+    update_run_manifest(
+        cfg["_meta"]["run_dir"],
+        {
+            "evaluation": {
+                "checkpoint_path": ckpt_path,
+                "summary_json": str(out_path),
+                "max_batches": int(max_batches),
+                "seed": int(eval_seed),
+                "deterministic": bool(eval_deterministic),
+            }
+        },
+    )
 
     if run is not None:
         run.finish()

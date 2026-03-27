@@ -1,0 +1,27 @@
+train:
+  mode: groupdro
+  domain_strategy: all_domains
+  epochs: 100
+  log_interval: 50
+  selection:
+    vector: ["val/acc_worst", "val/acc_avg", "val/acc_clean"]
+    eps: 1e-6
+  early_stopping:
+    enabled: false
+    metric: val/acc_worst
+    mode: max
+  optimizer:
+    name: sgd
+    lr: 0.1
+    momentum: 0.9
+    weight_decay: 0.0005
+  scheduler:
+    name: cosine
+    t_max: 100
+    eta_min: 0.0
+  groupdro:
+    eta_q: 0.02
+    include_clean: true
+    init_q: uniform
+    worst_group_by: acc
+    selection_metric: val/acc_worst

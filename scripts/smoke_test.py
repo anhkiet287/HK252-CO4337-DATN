@@ -20,10 +20,16 @@ def parse_args() -> argparse.Namespace:
         "--configs",
         nargs="+",
         default=[
-            "configs/smoke_quick_resnet18_erm.yaml",
-            "configs/smoke_quick_resnet18_pgd_at.yaml",
+            "configs/experiments/cifar10/resnet18/baselines/erm.yaml",
+            "configs/experiments/cifar10/resnet50/baselines/erm.yaml",
+            "configs/experiments/cifar10/vit_b16/baselines/erm.yaml",
         ],
-        help="List of config files to run.",
+        help="List of experiment config files to run.",
+    )
+    parser.add_argument(
+        "--profile",
+        default="configs/profiles/dev_fast.yaml",
+        help="Runtime profile overlay used for smoke runs.",
     )
     return parser.parse_args()
 
@@ -39,7 +45,7 @@ def main() -> None:
     """
     args = parse_args()
     cfg_paths: List[str] = list(args.configs)
-    run_smoke(cfg_paths)
+    run_smoke(cfg_paths, profile_path=args.profile)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,16 @@
+runtime:
+  profile: local_gpu
+experiment:
+  platform: local
+  device: cuda
+  precision: fp16
+dataset:
+  data_dir: data
+  num_workers: 4
+eval:
+  batch_size: 128
+logging:
+  output_dir: outputs/thesis/local
+  wandb:
+    enabled: true
+    mode: online

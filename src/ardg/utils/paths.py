@@ -46,7 +46,7 @@ def get_run_dir(cfg: Dict[str, Any]) -> str:
     output_dir = cfg.get("logging", {}).get("output_dir")
     if output_dir is None or str(output_dir).strip() == "":
         output_dir = default_output_dir(cfg)
-    run_name = cfg.get("logging", {}).get("run_name", "run")
+    run_name = str(cfg.get("logging", {}).get("run_name", "") or "").strip() or "run"
     output_root = Path(str(output_dir)).expanduser()
     if not output_root.is_absolute():
         output_root = project_root() / output_root

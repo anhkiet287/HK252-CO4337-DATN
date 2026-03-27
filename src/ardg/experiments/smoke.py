@@ -7,7 +7,7 @@ from ardg.models.factory import build_model
 from ardg.training.trainer import Trainer
 
 
-def run_smoke(cfg_paths: Sequence[str]) -> None:
+def run_smoke(cfg_paths: Sequence[str], profile_path: str | None = None) -> None:
     """Run smoke-test training and clean evaluation for each config.
 
     Args:
@@ -20,10 +20,10 @@ def run_smoke(cfg_paths: Sequence[str]) -> None:
         RuntimeError: If a smoke run fails to produce a checkpoint.
     """
     for cfg_path in cfg_paths:
-        _run_single(cfg_path)
+        _run_single(cfg_path, profile_path=profile_path)
 
 
-def _run_single(cfg_path: str) -> None:
+def _run_single(cfg_path: str, profile_path: str | None = None) -> None:
     """Run a single smoke-test train/eval cycle.
 
     Args:
@@ -35,7 +35,13 @@ def _run_single(cfg_path: str) -> None:
     Raises:
         RuntimeError: If no checkpoint is produced during training.
     """
-    cfg, logger, run, device = setup_run(cfg_path)
+    cfg, logger, run, device = setup_run(
+        cfg_path,
+        stage="smoke",
+        run_name_suffix="smoke",
+        profile_path=profile_path,
+        require_wandb=False,
+    )
     train_loader, val_loader, test_loader = build_loaders(cfg)
     model = build_model(cfg)
     trainer = Trainer(

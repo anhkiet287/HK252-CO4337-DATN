@@ -1,0 +1,15 @@
+_base_:
+  - ../../../../fragments/experiment/common.yaml
+  - ../../../../fragments/datasets/cifar10.yaml
+  - ../../../../fragments/models/vit_b16.yaml
+  - ../../../../fragments/methods/groupdro_plus.yaml
+  - ../../../../fragments/attacks/pgd_train.yaml
+  - ../../../../fragments/attacks/cifar10_eval_standard.yaml
+  - ../../../../fragments/logging/wandb_required.yaml
+
+experiment:
+  name: proposed_groupdro_plus
+dataset:
+  augmentation: standard
+train:
+  batch_size: 64

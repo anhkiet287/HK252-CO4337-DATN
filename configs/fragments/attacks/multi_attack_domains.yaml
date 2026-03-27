@@ -1,0 +1,33 @@
+attack:
+  multi_train:
+    norm: Linf
+    eps: 0.0313725
+    domains:
+      - name: clean
+        type: clean
+      - name: fgsm_rs
+        type: fgsm
+        alpha: 0.0313725
+        random_start: true
+      - name: pgd_ce
+        type: pgd
+        steps: 10
+        alpha: 0.007843
+        loss: ce
+        random_start: true
+      - name: pgd_dlr
+        type: pgd
+        steps: 10
+        alpha: 0.007843
+        loss: dlr
+        random_start: true
+val:
+  probe:
+    enabled: true
+    type: pgd
+    norm: Linf
+    eps: 0.0313725
+    steps: 20
+    alpha: 0.007843
+    restarts: 1
+    max_batches: 10

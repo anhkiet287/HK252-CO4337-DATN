@@ -1,0 +1,3 @@
+_base_:
+  - experiments/cifar10/resnet18/baselines/erm.yaml
+  - profiles/local_gpu.yaml
