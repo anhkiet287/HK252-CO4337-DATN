@@ -1,0 +1,6 @@
+_base_:
+  - pgd_train.yaml
+
+attack:
+  train:
+    norm: Linf

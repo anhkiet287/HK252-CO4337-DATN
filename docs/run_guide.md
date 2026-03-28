@@ -5,7 +5,7 @@
 Run a fast consistency check before training:
 
 ```bash
-python scripts/preflight_check.py --config configs/default.yaml --io_mode normalized --check-wandb
+sh scripts/qa/preflight_local.sh
 ```
 
 ## Local GPU
@@ -17,6 +17,13 @@ python scripts/train.py --config configs/experiments/cifar10/resnet18/baselines/
 python scripts/evaluate.py --config configs/experiments/cifar10/resnet18/eval/baseline_erm_all_attacks.yaml --profile configs/profiles/local_gpu.yaml --verbose
 ```
 
+Runtime precision is controlled by `experiment.precision`:
+
+- `fp32`: full precision
+- `fp16`: CUDA autocast + GradScaler
+- `bf16`: CUDA autocast without GradScaler
+- CPU fallback logs a forced `fp32` downgrade
+
 Proposed method:
 
 ```bash
@@ -26,10 +33,10 @@ python scripts/train.py --config configs/experiments/cifar10/resnet18/proposed/g
 Smoke runs:
 
 ```bash
-python scripts/train.py --config configs/experiments/cifar10/resnet18/baselines/erm.yaml --profile configs/profiles/dev_fast.yaml --verbose
-python scripts/evaluate.py --config configs/experiments/cifar10/resnet18/eval/baseline_erm_all_attacks.yaml --profile configs/profiles/dev_fast.yaml --smoke-one-sample --max-batches 1 --verbose
-python scripts/train.py --config configs/experiments/cifar10/resnet50/baselines/erm.yaml --profile configs/profiles/dev_fast.yaml --verbose
-python scripts/train.py --config configs/experiments/cifar10/vit_b16/baselines/erm.yaml --profile configs/profiles/dev_fast.yaml --verbose
+sh scripts/qa/smoke_resnet18_dev_fast.sh
+sh scripts/qa/test_resume_resnet18.sh
+sh scripts/qa/smoke_resnet50.sh
+sh scripts/qa/full_verify_local.sh
 ```
 
 ## Colab GPU
@@ -43,9 +50,9 @@ python scripts/evaluate.py --config configs/experiments/cifar10/resnet18/eval/ba
 ## SSH Server / H100
 
 ```bash
-python scripts/preflight_check.py --config configs/experiments/cifar10/vit_b16/baselines/erm.yaml --profile configs/profiles/h100.yaml --io_mode normalized --check-wandb
+sh scripts/qa/preflight_h100.sh
 python scripts/train.py --config configs/experiments/cifar10/resnet50/baselines/erm.yaml --profile configs/profiles/h100.yaml --verbose
-python scripts/train.py --config configs/experiments/cifar10/vit_b16/baselines/erm.yaml --profile configs/profiles/h100.yaml --verbose
+sh scripts/qa/smoke_vit_h100.sh
 ```
 
 ## Resume
@@ -59,5 +66,16 @@ python scripts/train.py --config configs/experiments/cifar10/resnet18/baselines/
 Or resume from a specific checkpoint:
 
 ```bash
-python scripts/train.py --config configs/experiments/cifar10/resnet18/baselines/erm.yaml --profile configs/profiles/local_gpu.yaml --checkpoint outputs/thesis/local/resnet18_local_baseline_erm_seed42/best.pt
+python scripts/train.py --config configs/experiments/cifar10/resnet18/baselines/erm.yaml --profile configs/profiles/local_gpu.yaml --checkpoint outputs/thesis/local/resnet18_local_baseline_erm_seed42/checkpoints/best.pt
+```
+
+## Artifact Registry
+
+- `artifacts/latest/manifest.yaml` records canonical config paths and latest important outputs
+- `artifacts/latest/paths.md` renders the same information in Markdown
+
+## W&B Policy Verification
+
+```bash
+sh scripts/qa/test_wandb_policy.sh
 ```

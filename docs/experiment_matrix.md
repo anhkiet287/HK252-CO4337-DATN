@@ -3,7 +3,9 @@
 | Backbone | Category | Config | Typical Profile | Purpose |
 | --- | --- | --- | --- | --- |
 | ResNet-18 | Baseline | `configs/experiments/cifar10/resnet18/baselines/erm.yaml` | `local_gpu` | Default clean baseline |
-| ResNet-18 | Baseline | `configs/experiments/cifar10/resnet18/baselines/pgd_at.yaml` | `local_gpu` | Adversarial baseline |
+| ResNet-18 | Baseline | `configs/experiments/cifar10/resnet18/baselines/pgd_at_linf.yaml` | `local_gpu` | Single-attack AT baseline with explicit Linf train norm |
+| ResNet-18 | Baseline | `configs/experiments/cifar10/resnet18/baselines/pgd_at_l2.yaml` | `local_gpu` | Single-attack AT baseline with explicit L2 train norm |
+| ResNet-18 | Baseline | `configs/experiments/cifar10/resnet18/baselines/uniform_multi_attack.yaml` | `local_gpu` | Uniform multi-attack baseline |
 | ResNet-18 | Proposed | `configs/experiments/cifar10/resnet18/proposed/groupdro_plus.yaml` | `local_gpu` | Thesis proposed method |
 | ResNet-18 | Ablation | `configs/experiments/cifar10/resnet18/ablations/groupdro.yaml` | `local_gpu` | Domain-weighting ablation |
 | ResNet-18 | Ablation | `configs/experiments/cifar10/resnet18/ablations/multi_attack_erm.yaml` | `local_gpu` | Attack-domain baseline ablation |

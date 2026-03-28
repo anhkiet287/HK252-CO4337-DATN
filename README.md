@@ -9,6 +9,11 @@ This repo is now organized as a thesis-focused experiment artifact. The primary 
 - Runtime profiles: `dev_fast`, `local_gpu`, `colab_gpu`, `h100`
 - W&B is mandatory for `scripts/train.py` and `scripts/evaluate.py`
 - Use `logging.wandb.mode: offline` for local smoke/debug, not `enabled: false`
+- `experiment.precision` now controls actual runtime precision in the shared stack:
+  - `fp32`: full precision
+  - `fp16`: CUDA autocast + GradScaler
+  - `bf16`: CUDA autocast without GradScaler
+  - CPU fallback stays in `fp32` and logs the fallback reason
 
 ## Local First
 
@@ -21,9 +26,8 @@ python scripts/evaluate.py --config configs/experiments/cifar10/resnet18/eval/ba
 Smoke runs before expensive GPUs:
 
 ```bash
-python scripts/train.py --config configs/experiments/cifar10/resnet18/baselines/erm.yaml --profile configs/profiles/dev_fast.yaml --verbose
-python scripts/evaluate.py --config configs/experiments/cifar10/resnet18/eval/baseline_erm_all_attacks.yaml --profile configs/profiles/dev_fast.yaml --smoke-one-sample --max-batches 1 --verbose
-python scripts/smoke_test.py
+sh scripts/qa/smoke_resnet18_dev_fast.sh
+sh scripts/qa/smoke_resnet50.sh
 ```
 
 ## Backbone Ladder
@@ -50,11 +54,43 @@ python scripts/train.py --config configs/experiments/cifar10/resnet18/baselines/
 - Each run directory now contains:
   - `resolved_config.yaml`
   - `run_manifest.json`
-  - `train.log` or `eval.log`
-  - checkpoint files such as `best.pt` and `last.pt`
-  - `train_summary.json` after training
-  - `eval_test_summary.json` after evaluation
-  - `wandb_run_id.txt` when W&B is attached
+  - `logs/train.log` or `logs/eval.log`
+  - `checkpoints/best.pt` and `checkpoints/last.pt`
+  - `train/summary.json` after training
+  - `eval/summary.json` after evaluation
+  - `wandb/run_id.txt` and `wandb/run_url.txt` when W&B is attached
+  - legacy root-level summary files are still written for compatibility
+
+## Verification Scripts
+
+Run these before scaling to Colab or H100:
+
+```bash
+sh scripts/qa/preflight_local.sh
+sh scripts/qa/test_wandb_policy.sh
+sh scripts/qa/smoke_resnet18_dev_fast.sh
+sh scripts/qa/test_resume_resnet18.sh
+sh scripts/qa/smoke_resnet50.sh
+```
+
+Strong-GPU-only smoke:
+
+```bash
+sh scripts/qa/preflight_h100.sh
+sh scripts/qa/smoke_vit_h100.sh
+```
+
+One-command local gate:
+
+```bash
+sh scripts/qa/full_verify_local.sh
+```
+
+## Artifact Registry
+
+- `artifacts/latest/manifest.yaml`: canonical config paths + latest important outputs
+- `artifacts/latest/paths.md`: human-readable latest paths
+- `artifacts/README.md`: registry policy
 
 ## Repo Layout
 
@@ -69,6 +105,6 @@ python scripts/train.py --config configs/experiments/cifar10/resnet18/baselines/
 ## Reporting
 
 ```bash
-python scripts/export_results.py --root outputs/thesis
-python scripts/build_report_tables.py --input outputs/exported_results.json --output outputs/report_table.md
+python scripts/export_results.py --root outputs
+python scripts/build_report_tables.py
 ```

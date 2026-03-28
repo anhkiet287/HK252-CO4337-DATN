@@ -21,9 +21,11 @@ class PGDAT(Objective):
 
     def preprocess_batch(self, batch: Any, model: Any) -> Any:
         images, labels = unpack_xy(batch)
+        was_training = bool(model.training)
         model.eval()
-        adv = self.attack(images, labels)
-        model.train()
+        with self.full_precision_context():
+            adv = self.attack(images, labels)
+        model.train(was_training)
         adv = adv.detach()
         if isinstance(batch, dict):
             new_batch = dict(batch)
@@ -33,8 +35,9 @@ class PGDAT(Objective):
 
     def compute_loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
         images, labels = unpack_xy(batch)
-        logits = model(images)
-        loss = compute_loss(logits, labels)
+        with self.autocast_context():
+            logits = model(images)
+            loss = compute_loss(logits, labels)
         correct = (logits.argmax(dim=1) == labels).sum().item()
         metrics = {
             "loss": float(loss.item()),

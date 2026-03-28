@@ -106,7 +106,8 @@ class GroupDROPlus(Objective):
         if use_adv:
             was_training = bool(model.training)
             model.eval()
-            images = self.attack(images, labels).detach()
+            with self.full_precision_context():
+                images = self.attack(images, labels).detach()
             model.train(was_training)
         return images, labels, use_adv
 
@@ -158,12 +159,14 @@ class GroupDROPlus(Objective):
         images, labels, is_adv = self._prepare_inputs(model, batch, attack_source="train")
         device = labels.device
 
-        logits = model(images)
+        with self.autocast_context():
+            logits = model(images)
+            base_loss = compute_loss(logits, labels)
         if self.cluster_mode == "epoch":
-            cluster_ids, centers, counts = self._assign_epoch_clusters(logits.detach())
+            cluster_ids, centers, counts = self._assign_epoch_clusters(logits.detach().float())
             num_groups = int(centers.size(0))
         else:
-            cluster_ids, centers, counts = self._cluster_batch(logits.detach())
+            cluster_ids, centers, counts = self._cluster_batch(logits.detach().float())
             num_groups = int(cluster_ids.max().item()) + 1 if int(cluster_ids.numel()) > 0 else 0
             counts = counts[:num_groups]
 
@@ -175,7 +178,7 @@ class GroupDROPlus(Objective):
         self.q = self.q / self.q.sum()
 
         group_weighted = (loss_g * self.q).sum()
-        reg = (compute_loss(logits, labels) * (self.q[cluster_ids] ** self.gamma)).mean()
+        reg = (base_loss * (self.q[cluster_ids] ** self.gamma)).mean()
         total_loss = group_weighted + self.lambda_reg * reg
 
         correct = (logits.argmax(dim=1) == labels).sum().item()
@@ -272,7 +275,8 @@ class GroupDROPlus(Objective):
                 moved = move_to_device(batch, device)
                 images, _, _ = self._prepare_inputs(model, moved, attack_source="epoch_cluster")
                 with torch.no_grad():
-                    embeddings_all.append(model(images).detach().cpu())
+                    with self.autocast_context():
+                        embeddings_all.append(model(images).detach().float().cpu())
 
                 if self.epoch_cluster_max_batches > 0 and batch_idx >= self.epoch_cluster_max_batches:
                     break
@@ -316,7 +320,8 @@ class GroupDROPlus(Objective):
                 images, labels, is_adv = self._prepare_inputs(model, moved, attack_source="train")
 
                 with torch.no_grad():
-                    embeddings = model(images)
+                    with self.autocast_context():
+                        embeddings = model(images).float()
                     if self.cluster_mode == "epoch":
                         cluster_ids, centers, counts = self._assign_epoch_clusters(embeddings.detach())
                     else:

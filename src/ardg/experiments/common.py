@@ -10,10 +10,16 @@ from ardg.data.datasets import get_dataloaders
 from ardg.evaluation.evaluator import evaluate_clean
 from ardg.models.factory import build_model
 from ardg.utils.logging import init_wandb, log_metrics, setup_logging
+from ardg.utils.artifacts import update_artifact_manifest
 from ardg.utils.paths import (
     default_output_dir,
     ensure_dir,
     get_run_dir,
+    get_wandb_run_id_path,
+    get_wandb_run_url_path,
+    get_legacy_wandb_run_id_path,
+    get_legacy_wandb_run_url_path,
+    initialize_run_layout,
     platform_workspace_root,
 )
 from ardg.utils.platform import resolve_platform
@@ -112,7 +118,8 @@ def setup_run(
 
     run_dir = Path(get_run_dir(cfg))
     ensure_dir(str(run_dir))
-    log_path = run_dir / f"{stage}.log"
+    layout = initialize_run_layout(str(run_dir))
+    log_path = Path(layout["logs_dir"]) / f"{stage}.log"
     logger = setup_logging(name=cfg.get("logging", {}).get("run_name"), log_file=str(log_path))
     device = _resolve_device(cfg.get("experiment", {}).get("device", "cpu"), logger)
     cfg.setdefault("experiment", {})["device"] = device
@@ -138,10 +145,13 @@ def setup_run(
     run = init_wandb(cfg, metadata=metadata, require_enabled=require_wandb)
     if run is not None and getattr(run, "id", None):
         wandb_cfg["run_id"] = str(run.id)
-        (run_dir / "wandb_run_id.txt").write_text(str(run.id), encoding="utf-8")
+        get_wandb_run_id_path(str(run_dir)).write_text(str(run.id), encoding="utf-8")
+        get_legacy_wandb_run_id_path(str(run_dir)).write_text(str(run.id), encoding="utf-8")
         metadata["wandb_run_id"] = str(run.id)
         if getattr(run, "url", None):
             metadata["wandb_url"] = str(run.url)
+            get_wandb_run_url_path(str(run_dir)).write_text(str(run.url), encoding="utf-8")
+            get_legacy_wandb_run_url_path(str(run_dir)).write_text(str(run.url), encoding="utf-8")
 
     manifest = {
         "stage": stage,
@@ -150,6 +160,7 @@ def setup_run(
         "platform_override": platform_override,
         "resolved_config_path": cfg["_meta"]["resolved_config_path"],
         "run_log_path": str(log_path),
+        "paths": layout,
         "run_metadata": metadata,
         "wandb": {
             "enabled": bool(wandb_cfg.get("enabled", False)),
@@ -158,6 +169,24 @@ def setup_run(
         },
     }
     cfg["_meta"]["run_manifest_path"] = write_run_manifest(str(run_dir), manifest)
+    update_artifact_manifest(
+        {
+            "latest": {
+                str(metadata.get("backbone") or "model"): {
+                    stage: {
+                        "run_name": metadata.get("run_name"),
+                        "run_dir": str(run_dir),
+                        "resolved_config": cfg["_meta"]["resolved_config_path"],
+                        "run_manifest": cfg["_meta"]["run_manifest_path"],
+                        "config_path": str(Path(cfg_path).resolve()),
+                        "profile_path": str(Path(profile_path).resolve()) if profile_path else None,
+                        "wandb_run_id": metadata.get("wandb_run_id"),
+                        "wandb_url": metadata.get("wandb_url"),
+                    }
+                }
+            }
+        }
+    )
 
     logger.info(
         "Initialized run name=%s stage=%s backbone=%s dataset=%s mode=%s profile=%s seed=%s device=%s precision=%s run_dir=%s",
@@ -234,6 +263,7 @@ def run_clean_eval(
     device: str,
     logger: Any,
     step: int,
+    precision: Any | None = None,
 ) -> None:
     """Run clean evaluation on val/test splits and log metrics.
 
@@ -250,7 +280,7 @@ def run_clean_eval(
     """
     eval_step = step
     for split_name, loader in (("val", val_loader), ("test", test_loader)):
-        metrics = evaluate_clean(model, loader, device)
+        metrics = evaluate_clean(model, loader, device, precision=precision)
         metrics["device"] = str(device)
         log_metrics(logger, metrics, step=eval_step, split=f"{split_name}_clean")
         eval_step += 1

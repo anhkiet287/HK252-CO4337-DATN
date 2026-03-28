@@ -7,17 +7,19 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
+from ardg.utils.artifacts import update_artifact_manifest
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build Markdown tables from exported eval results.")
     parser.add_argument(
         "--input",
-        default="outputs/exported_results.json",
+        default="artifacts/exports/latest_results.json",
         help="Path to aggregated JSON export from scripts/export_results.py.",
     )
     parser.add_argument(
         "--output",
-        default="outputs/report_table.md",
+        default="artifacts/reports/report_table.md",
         help="Path to the generated Markdown table.",
     )
     return parser.parse_args()
@@ -45,6 +47,15 @@ def main() -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"[INFO] report_table={output}")
+    update_artifact_manifest(
+        {
+            "latest": {
+                "reports": {
+                    "table_md": str(output),
+                }
+            }
+        }
+    )
 
 
 if __name__ == "__main__":

@@ -23,6 +23,15 @@
 - Allowed modes are `online` and `offline`
 - `offline` is the correct local smoke/debug path
 - Resume continuity is tracked with `wandb_run_id` in checkpoints and run manifests
+- `scripts/qa/test_wandb_policy.sh` verifies offline success, online init, and fail-fast disabled cases
+
+## Precision Contract
+
+- `experiment.precision=fp32` keeps the shared stack in full precision
+- `experiment.precision=fp16` enables CUDA autocast and GradScaler in the shared trainer
+- `experiment.precision=bf16` enables CUDA autocast without GradScaler
+- Validation and evaluation reuse the same precision policy where safe
+- CPU fallback remains supported and falls back to `fp32` explicitly
 
 ## Run Artifact Contract
 
@@ -30,11 +39,21 @@ Each run directory should contain:
 
 - `resolved_config.yaml`
 - `run_manifest.json`
-- stage log file such as `train.log` or `eval.log`
-- checkpoint files
-- `train_summary.json` after training
-- `eval_test_summary.json` after evaluation
-- `wandb_run_id.txt` when W&B is attached
+- `logs/<stage>.log`
+- `checkpoints/best.pt` and `checkpoints/last.pt`
+- `train/summary.json` after training
+- `eval/summary.json` after evaluation
+- `wandb/run_id.txt` and `wandb/run_url.txt`
+- compatibility copies of legacy summary files while old tooling is phased out
+
+## Artifact Registry
+
+- `artifacts/latest/manifest.yaml` is the repo-local source of truth for:
+  - canonical config paths
+  - latest train and eval run pointers by backbone
+  - latest checkpoint and summary paths
+  - latest export and report outputs
+- `artifacts/latest/paths.md` is the human-readable companion view
 
 ## Backbone Ladder
 

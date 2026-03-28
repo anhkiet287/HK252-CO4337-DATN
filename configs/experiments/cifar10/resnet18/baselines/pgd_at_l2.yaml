@@ -1,0 +1,15 @@
+_base_:
+  - ../../../../fragments/experiment/common.yaml
+  - ../../../../fragments/datasets/cifar10.yaml
+  - ../../../../fragments/models/resnet18.yaml
+  - ../../../../fragments/methods/pgd_at.yaml
+  - ../../../../fragments/attacks/pgd_train_l2.yaml
+  - ../../../../fragments/attacks/cifar10_eval_standard.yaml
+  - ../../../../fragments/logging/wandb_required.yaml
+
+experiment:
+  name: baseline_pgd_at_l2
+dataset:
+  augmentation: standard
+train:
+  batch_size: 256

@@ -1,0 +1,22 @@
+[
+  {
+    "avg_acc": 0.0,
+    "checkpoint": "outputs/dev_fast/resnet18_dev_baseline_erm_seed42/checkpoints/best.pt",
+    "clean_acc": 0.0,
+    "num_attacks": 10,
+    "run_dir": "/workspaces/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_baseline_erm_seed42_eval",
+    "runtime_sec": 3.084485561999827,
+    "seed": 42,
+    "worst_acc": 0.0
+  },
+  {
+    "avg_acc": 0.0,
+    "checkpoint": "outputs/dev_fast/resnet18_dev_baseline_erm_seed42/checkpoints/best.pt",
+    "clean_acc": 0.0,
+    "num_attacks": 10,
+    "run_dir": "outputs/dev_fast/resnet18_dev_baseline_erm_seed42_eval",
+    "runtime_sec": 3.084485561999827,
+    "seed": 42,
+    "worst_acc": 0.0
+  }
+]

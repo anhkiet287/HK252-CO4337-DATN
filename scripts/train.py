@@ -14,7 +14,8 @@ from ardg.config import DEFAULT_CONFIG_PATH
 from ardg.experiments.common import build_loaders, load_runtime_config, setup_run
 from ardg.models.factory import build_model
 from ardg.training.trainer import Trainer
-from ardg.utils.paths import get_run_dir
+from ardg.utils.logging import validate_wandb_policy
+from ardg.utils.paths import find_checkpoint, get_run_dir, get_run_root_from_artifact, get_wandb_run_id_path
 from ardg.utils.run_metadata import update_run_manifest
 
 
@@ -77,11 +78,12 @@ def _resolve_resume_checkpoint(
         platform_override=platform_override,
     )
     run_dir = Path(get_run_dir(cfg))
-    for candidate in (run_dir / "last.pt", run_dir / "best.pt"):
-        if candidate.exists():
-            return str(candidate)
+    candidate = find_checkpoint(str(run_dir), names=("last", "best"))
+    if candidate:
+        return candidate
     raise FileNotFoundError(
-        f"Resume requested but no checkpoint found in {run_dir}. Expected last.pt or best.pt."
+        f"Resume requested but no checkpoint found in {run_dir}. "
+        "Expected checkpoints/last.pt or checkpoints/best.pt."
     )
 
 
@@ -97,7 +99,10 @@ def _extract_wandb_run_id(ckpt_path: Optional[str]) -> Optional[str]:
         if run_id:
             return str(run_id)
 
-    run_id_file = Path(ckpt_path).parent / "wandb_run_id.txt"
+    run_dir = get_run_root_from_artifact(ckpt_path)
+    run_id_file = get_wandb_run_id_path(str(run_dir))
+    if not run_id_file.exists():
+        run_id_file = Path(ckpt_path).parent / "wandb_run_id.txt"
     if run_id_file.exists():
         value = run_id_file.read_text(encoding="utf-8").strip()
         if value:
@@ -126,6 +131,12 @@ def main() -> None:
         args.checkpoint,
         args.platform,
     )
+    preview_cfg = load_runtime_config(
+        args.config,
+        profile_path=args.profile,
+        platform_override=args.platform,
+    )
+    validate_wandb_policy(preview_cfg, require_enabled=True)
     resume_run_id = args.wandb_run_id or _extract_wandb_run_id(resume_ckpt)
     resume_mode = "must" if resume_run_id else None
     cfg, logger, run, device = setup_run(

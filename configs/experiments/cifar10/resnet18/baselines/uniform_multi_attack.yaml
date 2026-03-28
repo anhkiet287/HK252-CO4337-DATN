@@ -1,0 +1,5 @@
+_base_:
+  - ../ablations/multi_attack_erm.yaml
+
+experiment:
+  name: baseline_uniform_multi_attack

@@ -20,8 +20,15 @@ from ardg.experiments.common import (
     load_model_from_checkpoint,
     setup_run,
 )
-from ardg.utils.logging import log_metrics
-from ardg.utils.paths import get_run_dir
+from ardg.utils.artifacts import update_artifact_manifest
+from ardg.utils.logging import log_metrics, validate_wandb_policy
+from ardg.utils.paths import (
+    find_checkpoint,
+    get_eval_summary_path,
+    get_legacy_eval_summary_path,
+    get_run_dir,
+)
+from ardg.utils.precision import PrecisionController
 from ardg.utils.run_metadata import update_run_manifest
 from ardg.utils.seed import set_seed
 
@@ -78,7 +85,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--save-json",
         default=None,
-        help="Optional output JSON path. Default: <run_dir>/eval_test_summary.json",
+        help="Optional output JSON path. Default: <run_dir>/eval/summary.json",
     )
     parser.add_argument(
         "--platform",
@@ -109,6 +116,13 @@ def _resolve_checkpoint(cfg: Dict[str, Any], ckpt_arg: str | None) -> str:
 
     tried = []
     for base in candidates:
+        for direct in (
+            find_checkpoint(str(base), names=("best", "last")),
+            find_checkpoint(str(base), names=("last", "best")),
+        ):
+            if direct:
+                tried.append(str(direct))
+                return str(direct)
         for cand in (base / "best.pt", base / "last.pt"):
             tried.append(str(cand))
             if cand.exists():
@@ -193,6 +207,7 @@ def main() -> None:
         profile_path=args.profile,
         platform_override=args.platform,
     )
+    validate_wandb_policy(preview_cfg, require_enabled=True)
     ckpt_path = _resolve_checkpoint(preview_cfg, args.checkpoint)
     cfg, logger, run, device = setup_run(
         args.config,
@@ -228,6 +243,17 @@ def main() -> None:
     elif args.max_test_samples is not None:
         cfg.setdefault("dataset", {})["max_test_samples"] = max(1, int(args.max_test_samples))
 
+    precision = PrecisionController.from_config(cfg, device=device)
+    logger.info("Precision runtime: %s", precision.describe())
+    update_run_manifest(
+        cfg["_meta"]["run_dir"],
+        {
+            "runtime": {
+                "precision": precision.as_dict(),
+            }
+        },
+    )
+
     model = load_model_from_checkpoint(cfg, ckpt_path, device)
 
     _, _, test_loader = build_loaders(cfg)
@@ -235,7 +261,7 @@ def main() -> None:
     if args.smoke_one_sample and cli_max_batches is None:
         cli_max_batches = 1
     max_batches = _resolve_max_batches(cfg, cli_max_batches)
-    evaluator = Evaluator(model, test_loader, device=device, max_batches=max_batches)
+    evaluator = Evaluator(model, test_loader, device=device, max_batches=max_batches, precision=precision)
 
     start = time.perf_counter()
     clean = evaluator.evaluate_clean()
@@ -318,10 +344,11 @@ def main() -> None:
     out_path = (
         Path(args.save_json)
         if args.save_json
-        else Path(get_run_dir(cfg)) / "eval_test_summary.json"
+        else get_eval_summary_path(get_run_dir(cfg))
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    get_legacy_eval_summary_path(get_run_dir(cfg)).write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(f"[INFO] saved={out_path}")
     update_run_manifest(
         cfg["_meta"]["run_dir"],
@@ -329,11 +356,29 @@ def main() -> None:
             "evaluation": {
                 "checkpoint_path": ckpt_path,
                 "summary_json": str(out_path),
+                "legacy_summary_json": str(get_legacy_eval_summary_path(get_run_dir(cfg))),
                 "max_batches": int(max_batches),
                 "seed": int(eval_seed),
                 "deterministic": bool(eval_deterministic),
             }
         },
+    )
+    update_artifact_manifest(
+        {
+            "latest": {
+                str(cfg.get("_meta", {}).get("run_metadata", {}).get("backbone", "model")): {
+                    "eval": {
+                        "run_name": cfg.get("_meta", {}).get("run_metadata", {}).get("run_name"),
+                        "run_dir": cfg.get("_meta", {}).get("run_dir"),
+                        "checkpoint": ckpt_path,
+                        "summary_json": str(out_path),
+                        "resolved_config": cfg.get("_meta", {}).get("resolved_config_path"),
+                        "wandb_run_id": cfg.get("_meta", {}).get("run_metadata", {}).get("wandb_run_id"),
+                        "wandb_url": cfg.get("_meta", {}).get("run_metadata", {}).get("wandb_url"),
+                    }
+                }
+            }
+        }
     )
 
     if run is not None:

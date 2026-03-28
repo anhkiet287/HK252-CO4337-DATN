@@ -72,19 +72,10 @@ def init_wandb(
         ImportError: When wandb is enabled but not installed.
         ValueError: When W&B is required but disabled or misconfigured.
     """
-    wandb_cfg = cfg.get("logging", {}).get("wandb", {})
-    enabled = bool(wandb_cfg.get("enabled", False))
-    if require_enabled and not enabled:
-        raise ValueError(
-            "W&B logging is mandatory for canonical train/eval runs. "
-            "Set logging.wandb.enabled=true and choose logging.wandb.mode=online|offline."
-        )
+    enabled, mode = validate_wandb_policy(cfg, require_enabled=require_enabled)
     if not enabled:
         return None
-
-    mode = str(wandb_cfg.get("mode", "online") or "online").strip().lower()
-    if mode not in {"online", "offline"}:
-        raise ValueError(f"Unsupported logging.wandb.mode={mode!r}. Use 'online' or 'offline'.")
+    wandb_cfg = cfg.get("logging", {}).get("wandb", {})
 
     try:
         import wandb  # type: ignore
@@ -134,6 +125,21 @@ def init_wandb(
         except Exception:
             pass
     return run
+
+
+def validate_wandb_policy(cfg: Dict[str, Any], require_enabled: bool = False) -> tuple[bool, str]:
+    """Validate W&B enable/mode policy before runtime work starts."""
+    wandb_cfg = cfg.get("logging", {}).get("wandb", {})
+    enabled = bool(wandb_cfg.get("enabled", False))
+    if require_enabled and not enabled:
+        raise ValueError(
+            "W&B logging is mandatory for canonical train/eval runs. "
+            "Set logging.wandb.enabled=true and choose logging.wandb.mode=online|offline."
+        )
+    mode = str(wandb_cfg.get("mode", "online") or "online").strip().lower()
+    if enabled and mode not in {"online", "offline"}:
+        raise ValueError(f"Unsupported logging.wandb.mode={mode!r}. Use 'online' or 'offline'.")
+    return enabled, mode
 
 
 def _format_wandb_init_error(exc: Exception, mode: str) -> str:

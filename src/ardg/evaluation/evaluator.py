@@ -9,6 +9,7 @@ import torch
 
 from ardg.training.losses import compute_loss
 from ardg.utils.batch import unpack_xy
+from ardg.utils.precision import PrecisionController
 
 
 class Evaluator:
@@ -29,18 +30,34 @@ class Evaluator:
         device: str,
         attack_suite: Dict[str, Any] | None = None,
         max_batches: int = 0,
+        precision: PrecisionController | None = None,
     ) -> None:
         self.model = model
         self.loader = loader
         self.device = torch.device(device)
         self.attack_suite: Dict[str, Any] = dict(attack_suite or {})
         self.max_batches = max(0, int(max_batches))
+        self.precision = precision
 
     def _iter_batches(self) -> Iterable[Any]:
         if self.max_batches <= 0:
             yield from self.loader
             return
         yield from itertools.islice(self.loader, self.max_batches)
+
+    def _autocast_context(self) -> Any:
+        if self.precision is None:
+            from contextlib import nullcontext
+
+            return nullcontext()
+        return self.precision.autocast_context()
+
+    def _full_precision_context(self) -> Any:
+        if self.precision is None:
+            from contextlib import nullcontext
+
+            return nullcontext()
+        return self.precision.full_precision_context()
 
     @torch.no_grad()
     def evaluate_clean(self) -> Dict[str, float]:
@@ -53,8 +70,9 @@ class Evaluator:
             images, labels = unpack_xy(batch)
             images = images.to(self.device)
             labels = labels.to(self.device)
-            logits = self.model(images)
-            loss = compute_loss(logits, labels)
+            with self._autocast_context():
+                logits = self.model(images)
+                loss = compute_loss(logits, labels)
             total_loss += float(loss.item()) * int(images.size(0))
             total_correct += int((logits.argmax(dim=1) == labels).sum().item())
             total_seen += int(images.size(0))
@@ -74,10 +92,12 @@ class Evaluator:
             images, labels = unpack_xy(batch)
             images = images.to(self.device)
             labels = labels.to(self.device)
-            adv = attack(images, labels).detach()
+            with self._full_precision_context():
+                adv = attack(images, labels).detach()
             with torch.no_grad():
-                logits = self.model(adv)
-                loss = compute_loss(logits, labels)
+                with self._autocast_context():
+                    logits = self.model(adv)
+                    loss = compute_loss(logits, labels)
             total_loss += float(loss.item()) * int(images.size(0))
             total_correct += int((logits.argmax(dim=1) == labels).sum().item())
             total_seen += int(images.size(0))
@@ -105,9 +125,21 @@ class Evaluator:
         }
 
 
-def evaluate_clean(model: Any, loader: Any, device: str, max_batches: int = 0) -> Dict[str, float]:
+def evaluate_clean(
+    model: Any,
+    loader: Any,
+    device: str,
+    max_batches: int = 0,
+    precision: PrecisionController | None = None,
+) -> Dict[str, float]:
     """Function wrapper for backward compatibility."""
-    return Evaluator(model, loader, device=device, max_batches=max_batches).evaluate_clean()
+    return Evaluator(
+        model,
+        loader,
+        device=device,
+        max_batches=max_batches,
+        precision=precision,
+    ).evaluate_clean()
 
 
 def evaluate_under_attack(
@@ -116,9 +148,16 @@ def evaluate_under_attack(
     attack: Any,
     device: str,
     max_batches: int = 0,
+    precision: PrecisionController | None = None,
 ) -> Dict[str, float]:
     """Function wrapper for backward compatibility."""
-    return Evaluator(model, loader, device=device, max_batches=max_batches).evaluate_under_attack(attack)
+    return Evaluator(
+        model,
+        loader,
+        device=device,
+        max_batches=max_batches,
+        precision=precision,
+    ).evaluate_under_attack(attack)
 
 
 def evaluate_suite(
@@ -127,6 +166,7 @@ def evaluate_suite(
     attacks: Dict[str, Any],
     device: str,
     max_batches: int = 0,
+    precision: PrecisionController | None = None,
 ) -> Dict[str, Dict[str, float]]:
     """Function wrapper for backward compatibility."""
     return Evaluator(
@@ -135,4 +175,5 @@ def evaluate_suite(
         device=device,
         attack_suite=attacks,
         max_batches=max_batches,
+        precision=precision,
     ).evaluate_suite()

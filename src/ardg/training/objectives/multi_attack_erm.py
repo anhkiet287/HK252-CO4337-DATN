@@ -221,9 +221,11 @@ class AttackDomainObjective(Objective):
         labels: torch.Tensor,
         model: Any,
     ) -> torch.Tensor:
+        was_training = bool(model.training)
         model.eval()
-        adv = attack(images, labels).detach()
-        model.train()
+        with self.full_precision_context():
+            adv = attack(images, labels).detach()
+        model.train(was_training)
         return adv
 
     def build_per_batch_batch(self, batch: Any, model: Any, rng: random.Random) -> Dict[str, Any]:
@@ -253,6 +255,7 @@ class AttackDomainObjective(Objective):
         )
         adv = images.detach().clone()
         batch_counts: Dict[str, int] = {}
+        was_training = bool(model.training)
         model.eval()
         for idx, domain in enumerate(self.domains):
             mask = domain_ids == idx
@@ -260,9 +263,10 @@ class AttackDomainObjective(Objective):
                 continue
             name = domain["name"]
             count = int(mask.sum().item())
-            adv[mask] = self.attacks[name](images[mask], labels[mask]).detach()
+            with self.full_precision_context():
+                adv[mask] = self.attacks[name](images[mask], labels[mask]).detach()
             batch_counts[name] = count
-        model.train()
+        model.train(was_training)
 
         data["x"] = adv
         data["domain_ids"] = domain_ids
@@ -280,13 +284,15 @@ class AttackDomainObjective(Objective):
         domain_names: List[str] = []
         batch_counts: Dict[str, int] = {}
 
+        was_training = bool(model.training)
         model.eval()
         for domain in self.domains:
             name = domain["name"]
-            x_domains.append(self.attacks[name](images, labels).detach())
+            with self.full_precision_context():
+                x_domains.append(self.attacks[name](images, labels).detach())
             domain_names.append(name)
             batch_counts[name] = batch_size
-        model.train()
+        model.train(was_training)
 
         data["x_domains"] = x_domains
         data["domain_names"] = domain_names
@@ -306,8 +312,9 @@ class AttackDomainObjective(Objective):
         metric_values: Dict[str, Any] = {}
 
         for x_dom, name in zip(x_domains, domain_names):
-            logits_dom = model(x_dom)
-            loss_dom = compute_loss(logits_dom, labels)
+            with self.autocast_context():
+                logits_dom = model(x_dom)
+                loss_dom = compute_loss(logits_dom, labels)
             acc_dom = float((logits_dom.argmax(dim=1) == labels).float().mean().item())
             losses.append(loss_dom)
             acc_values[str(name)] = acc_dom
@@ -366,47 +373,9 @@ class MultiAttackERM(AttackDomainObjective):
         seed = int(cfg.get("experiment", {}).get("seed", 42))
         self.rng = random.Random(seed)
 
-        self.probe_cfg = dict(cfg.get("val", {}).get("probe", {}))
-        self.probe_enabled = bool(self.probe_cfg.get("enabled", False))
-        self.val_max_batches = int(train_cfg.get("val_max_batches", self.probe_cfg.get("max_batches", 10)))
+        self.val_max_batches = int(train_cfg.get("val_max_batches", 10))
         if self.val_max_batches < 0:
             self.val_max_batches = 0
-        self.probe_attack = None
-        if self.probe_enabled:
-            self.probe_attack = self._build_probe_attack(model)
-
-    def _build_probe_attack(self, model: Any) -> Any:
-        probe_type = str(self.probe_cfg.get("type", "pgd")).lower()
-        if probe_type != "pgd":
-            raise ValueError(
-                f"Unsupported val.probe.type={probe_type!r}. Only 'pgd' is supported."
-            )
-        eps = float(self.probe_cfg.get("eps", self.shared_eps if self.shared_eps is not None else 8.0 / 255.0))
-        alpha = float(self.probe_cfg.get("alpha", self.probe_cfg.get("step_size", 2.0 / 255.0)))
-        steps = int(self.probe_cfg.get("steps", self.probe_cfg.get("num_steps", 20)))
-        restarts = int(self.probe_cfg.get("restarts", 1))
-        norm = str(self.probe_cfg.get("norm", self.shared_norm if self.shared_norm is not None else "Linf"))
-        loss_name = str(self.probe_cfg.get("loss", "ce")).lower()
-        spec = {
-            "name": "probe_pgd",
-            "type": "pgd",
-            "eps": eps,
-            "alpha": alpha,
-            "step_size": alpha,
-            "steps": steps,
-            "num_steps": steps,
-            "restarts": restarts,
-            "norm": norm,
-            "loss": loss_name,
-            "random_start": bool(self.probe_cfg.get("random_start", True)),
-        }
-        return build_attack(
-            spec,
-            model,
-            dataset_name=str(self.cfg["dataset"]["name"]),
-            shared_norm=norm,
-            shared_eps=eps,
-        )
 
     def preprocess_batch(self, batch: Any, model: Any) -> Any:
         if self.strategy == "per_batch":
@@ -454,8 +423,9 @@ class MultiAttackERM(AttackDomainObjective):
             return loss, metrics
 
         images = data["x"]
-        logits = model(images)
-        loss = compute_loss(logits, labels)
+        with self.autocast_context():
+            logits = model(images)
+            loss = compute_loss(logits, labels)
         correct = float((logits.argmax(dim=1) == labels).sum().item())
         metrics.update(
             {
@@ -489,11 +459,13 @@ class MultiAttackERM(AttackDomainObjective):
                 if domain.get("type") == "clean":
                     attacked = images
                 else:
-                    with torch.enable_grad():
-                        attacked = self.attacks[name](images, labels).detach()
+                    with self.full_precision_context():
+                        with torch.enable_grad():
+                            attacked = self.attacks[name](images, labels).detach()
                 with torch.no_grad():
-                    logits = model(attacked)
-                    loss = compute_loss(logits, labels)
+                    with self.autocast_context():
+                        logits = model(attacked)
+                        loss = compute_loss(logits, labels)
 
                 seen = float(images.size(0))
                 correct = float((logits.argmax(dim=1) == labels).sum().item())
@@ -521,31 +493,4 @@ class MultiAttackERM(AttackDomainObjective):
             if "clean" in acc_by_domain:
                 metrics["acc_clean"] = float(acc_by_domain["clean"])
 
-        if not self.probe_enabled or self.probe_attack is None:
-            return metrics
-
-        probe_max_batches = int(self.probe_cfg.get("max_batches", 10))
-        if probe_max_batches <= 0:
-            return metrics
-
-        probe_total_loss = 0.0
-        probe_total_correct = 0
-        probe_total_seen = 0
-        for step_idx, batch in enumerate(loader, start=1):
-            data = as_xy_dict(batch)
-            images = data["x"].to(device)
-            labels = data["y"].to(device)
-            with torch.enable_grad():
-                adv = self.probe_attack(images, labels).detach()
-            with torch.no_grad():
-                logits = model(adv)
-                loss = compute_loss(logits, labels)
-            probe_total_loss += float(loss.item()) * images.size(0)
-            probe_total_correct += int((logits.argmax(dim=1) == labels).sum().item())
-            probe_total_seen += int(images.size(0))
-            if step_idx >= probe_max_batches:
-                break
-
-        metrics["pgd20_probe_loss"] = probe_total_loss / max(probe_total_seen, 1)
-        metrics["pgd20_probe_acc"] = probe_total_correct / max(probe_total_seen, 1)
         return metrics

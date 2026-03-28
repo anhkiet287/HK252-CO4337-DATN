@@ -57,7 +57,15 @@ def _run_single(cfg_path: str, profile_path: str | None = None) -> None:
     if not ckpt_path:
         raise RuntimeError("Smoke test did not produce a checkpoint.")
     model = load_model_from_checkpoint(cfg, ckpt_path, device)
-    run_clean_eval(model, val_loader, test_loader, device, logger, trainer.global_step + 1)
+    run_clean_eval(
+        model,
+        val_loader,
+        test_loader,
+        device,
+        logger,
+        trainer.global_step + 1,
+        precision=trainer.precision,
+    )
 
     if run is not None:
         run.finish()

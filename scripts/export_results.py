@@ -8,22 +8,24 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
+from ardg.utils.artifacts import update_artifact_manifest
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export eval summaries from run directories.")
     parser.add_argument(
         "--root",
         default="outputs",
-        help="Root directory to scan for eval_test_summary.json files.",
+        help="Root directory to scan for run manifests and eval summaries.",
     )
     parser.add_argument(
         "--json-out",
-        default="outputs/exported_results.json",
+        default="artifacts/exports/latest_results.json",
         help="Path to aggregated JSON export.",
     )
     parser.add_argument(
         "--csv-out",
-        default="outputs/exported_results.csv",
+        default="artifacts/exports/latest_results.csv",
         help="Path to aggregated CSV export.",
     )
     return parser.parse_args()
@@ -32,7 +34,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     root = Path(args.root)
-    summary_paths = sorted(root.glob("**/eval_test_summary.json"))
+    summary_paths = _collect_summary_paths(root)
     rows = [_to_row(path) for path in summary_paths]
 
     json_out = Path(args.json_out)
@@ -60,14 +62,50 @@ def main() -> None:
     print(f"[INFO] exported_json={json_out}")
     print(f"[INFO] exported_csv={csv_out}")
     print(f"[INFO] runs={len(rows)}")
+    update_artifact_manifest(
+        {
+            "latest": {
+                "exports": {
+                    "json": str(json_out),
+                    "csv": str(csv_out),
+                }
+            }
+        }
+    )
+
+
+def _collect_summary_paths(root: Path) -> List[Path]:
+    seen: set[Path] = set()
+    collected: List[Path] = []
+
+    for manifest_path in sorted(root.glob("**/run_manifest.json")):
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        summary_path = payload.get("evaluation", {}).get("summary_json")
+        if summary_path:
+            candidate = Path(str(summary_path))
+            if candidate.exists():
+                resolved = candidate.resolve()
+                if resolved not in seen:
+                    seen.add(resolved)
+                    collected.append(candidate)
+
+    for pattern in ("**/eval/summary.json", "**/eval_test_summary.json"):
+        for candidate in sorted(root.glob(pattern)):
+            resolved = candidate.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                collected.append(candidate)
+
+    return collected
 
 
 def _to_row(path: Path) -> Dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     summary = payload.get("summary", {})
     robust = payload.get("robust", {})
+    run_dir = path.parent.parent if path.parent.name == "eval" else path.parent
     return {
-        "run_dir": str(path.parent),
+        "run_dir": str(run_dir),
         "checkpoint": payload.get("checkpoint"),
         "seed": payload.get("seed"),
         "clean_acc": summary.get("test/acc_clean"),

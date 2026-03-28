@@ -16,8 +16,18 @@ from ardg.training.losses import compute_loss
 from ardg.training.objectives import build_objective
 from ardg.training.objectives.multi_attack_erm import resolve_multi_attack_train_cfg
 from ardg.utils.batch import move_to_device, unpack_xy
+from ardg.utils.artifacts import update_artifact_manifest
 from ardg.utils.logging import log_metrics
-from ardg.utils.paths import ensure_dir, get_run_dir
+from ardg.utils.paths import (
+    ensure_dir,
+    find_checkpoint,
+    get_checkpoint_path,
+    get_legacy_train_summary_path,
+    get_run_dir,
+    get_train_summary_path,
+    initialize_run_layout,
+)
+from ardg.utils.precision import PrecisionController
 from ardg.utils.run_metadata import update_run_manifest
 
 
@@ -44,6 +54,8 @@ class Trainer:
         # load model to device
         self.device = torch.device(device or "cpu")
         self.model.to(self.device)
+        self.run_dir = get_run_dir(self.cfg)
+        initialize_run_layout(self.run_dir)
         
         self.logger = logger or logging.getLogger(__name__) # init logging
 
@@ -83,8 +95,11 @@ class Trainer:
                 eta_min=eta_min,
             )
 
+        self.precision = PrecisionController.from_config(cfg, device=str(self.device))
+
         # build loss function 
         self.objective = build_objective(cfg, model)
+        self.objective.set_precision_controller(self.precision)
         self.val_suite = _build_val_suite(cfg, model)
         self.val_evaluator = Evaluator(
             model,
@@ -92,6 +107,7 @@ class Trainer:
             device=str(self.device),
             attack_suite=self.val_suite,
             max_batches=int(self.max_val_batches or 0),
+            precision=self.precision,
         )
         self.best_metric = float("-inf")
         self.best_metric_name = "acc_clean"
@@ -119,6 +135,15 @@ class Trainer:
             raise ValueError(f"Unsupported early_stopping.mode: {self.es_mode!r}. Use 'min' or 'max'.")
         self.es_best_metric = float("inf") if self.es_mode == "min" else float("-inf")
         self.es_bad_epochs = 0
+        self.logger.info("Precision runtime: %s", self.precision.describe())
+        update_run_manifest(
+            self.run_dir,
+            {
+                "runtime": {
+                    "precision": self.precision.as_dict(),
+                }
+            },
+        )
 
     def train(self) -> Dict[str, str]:
         """Run the full training loop."""
@@ -133,11 +158,9 @@ class Trainer:
                 self.start_epoch,
                 epochs,
             )
-            run_dir = Path(get_run_dir(self.cfg))
-            last_path = str(run_dir / "last.pt")
-            best_path = self.best_ckpt_path or str(run_dir / "best.pt")
-            if not Path(best_path).exists():
-                best_path = last_path
+            run_dir = Path(self.run_dir)
+            last_path = find_checkpoint(str(run_dir), names=("last", "best")) or str(get_checkpoint_path(str(run_dir), "last"))
+            best_path = self.best_ckpt_path or find_checkpoint(str(run_dir), names=("best", "last")) or last_path
             return {"last": last_path, "best": best_path}
 
         # training loop
@@ -301,7 +324,7 @@ class Trainer:
             }
         )
         update_run_manifest(
-            get_run_dir(self.cfg),
+            self.run_dir,
             {
                 "training": {
                     "best_checkpoint": best_path,
@@ -309,9 +332,28 @@ class Trainer:
                     "best_epoch": int(self.best_epoch),
                     "best_metric": float(self.best_metric),
                     "best_metric_name": str(self.best_metric_name),
-                    "train_summary_json": summary_path,
+                    "summary_json": summary_path,
+                    "legacy_summary_json": str(get_legacy_train_summary_path(self.run_dir)),
                 }
             },
+        )
+        update_artifact_manifest(
+            {
+                "latest": {
+                    str(self.cfg.get("_meta", {}).get("run_metadata", {}).get("backbone", "model")): {
+                        "train": {
+                            "run_name": self.cfg.get("_meta", {}).get("run_metadata", {}).get("run_name"),
+                            "run_dir": self.run_dir,
+                            "best_checkpoint": best_path,
+                            "last_checkpoint": last_ckpt_path,
+                            "train_summary_json": summary_path,
+                            "resolved_config": self.cfg.get("_meta", {}).get("resolved_config_path"),
+                            "wandb_run_id": self.wandb_run_id,
+                            "wandb_url": self.cfg.get("_meta", {}).get("run_metadata", {}).get("wandb_url"),
+                        }
+                    }
+                }
+            }
         )
         return {"last": last_ckpt_path, "best": best_path}
 
@@ -353,6 +395,7 @@ class Trainer:
             self.global_step = int(checkpoint["global_step"])
         else:
             self.global_step = resumed_epoch * self._steps_per_epoch()
+        self.precision.load_state_dict(checkpoint.get("grad_scaler"))
 
         if checkpoint.get("best_metric") is not None:
             self.best_metric = float(checkpoint["best_metric"])
@@ -544,8 +587,9 @@ class Trainer:
 
         self.optimizer.zero_grad(set_to_none=True)
         loss, metrics = self.objective.compute_loss(self.model, batch)
-        loss.backward()
-        self.optimizer.step()
+        self.precision.backward(loss)
+        self.precision.step_optimizer(self.optimizer)
+        self.precision.update()
 
         metrics["optim/lr"] = self.optimizer.param_groups[0]["lr"]
         return metrics
@@ -553,15 +597,17 @@ class Trainer:
     def _save_checkpoint(self, name: str, metrics: Dict[str, Any], epoch: int | None) -> str:
         """Save a model checkpoint."""
         epoch_value = int(epoch if epoch is not None else metrics.get("epoch", 0))
-        run_dir = get_run_dir(self.cfg)
+        run_dir = self.run_dir
         ensure_dir(run_dir)
-        ckpt_path = f"{run_dir}/{name}.pt"
+        ckpt_path = str(get_checkpoint_path(run_dir, name))
         selection_names = metrics.get("selection_names")
         state = {
             "model": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "scheduler": self.scheduler.state_dict() if self.scheduler is not None else None,
             "objective": self.objective.state_dict() if hasattr(self.objective, "state_dict") else {},
+            "precision": self.precision.as_dict(),
+            "grad_scaler": self.precision.state_dict(),
             "metrics": metrics,
             "selection_names": selection_names,
             "selection_vector": metrics.get("selection_vector"),
@@ -593,10 +639,14 @@ class Trainer:
         return ckpt_path
 
     def _write_train_summary(self, payload: Dict[str, Any]) -> str:
-        run_dir = Path(get_run_dir(self.cfg))
+        run_dir = Path(self.run_dir)
         ensure_dir(str(run_dir))
-        summary_path = run_dir / "train_summary.json"
+        summary_path = get_train_summary_path(self.run_dir)
         summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        get_legacy_train_summary_path(self.run_dir).write_text(
+            json.dumps(payload, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
         return str(summary_path)
 
     def _steps_per_epoch(self) -> int:
@@ -684,8 +734,6 @@ def _normalize_ckpt_token(token: str) -> str:
         "clean": "clean_acc",
         "acc_clean": "clean_acc",
         "clean_acc": "clean_acc",
-        "pgd20_probe": "pgd20_probe_acc",
-        "pgd20_probe_acc": "pgd20_probe_acc",
     }
     return alias.get(normalized, normalized)
 
@@ -695,8 +743,6 @@ def _resolve_ckpt_metric_value(token: str, metrics: Dict[str, float]) -> tuple[s
     if token.startswith("val/"):
         name, value = _resolve_ckpt_metric_value(token.replace("val/", ""), {k.replace("val/",""):v for k,v in metrics.items()})
         return f"val/{name}", value
-    if token == "pgd20_probe_acc":
-        return "pgd20_probe_acc", float(metrics.get("pgd20_probe_acc", float("-inf")))
     if token == "worst_acc":
         value = metrics.get("acc_worst", metrics.get("acc", float("-inf")))
         return "worst_acc", float(value)

@@ -16,6 +16,7 @@ from ardg.data.transforms import build_transforms, get_dataset_stats
 from ardg.experiments.common import load_runtime_config, setup_run
 from ardg.models.factory import build_model
 from ardg.utils.data import normalize_dataset_name
+from ardg.utils.precision import PrecisionController
 
 
 def parse_args() -> argparse.Namespace:
@@ -100,6 +101,8 @@ def main() -> None:
     )
     cfg_device = str(cfg.get("experiment", {}).get("device", "cpu"))
     device = torch.device(cfg_device if (cfg_device.startswith("cuda") and torch.cuda.is_available()) else "cpu")
+    precision = PrecisionController.from_config(cfg, device=str(device))
+    print(f"[INFO] precision={precision.describe()}")
 
     if args.check_wandb:
         _, _, run, _ = setup_run(
@@ -169,7 +172,8 @@ def main() -> None:
     model = build_model(cfg).to(device)
     model.eval()
     with torch.no_grad():
-        logits = model(x_norm)
+        with precision.autocast_context():
+            logits = model(x_norm)
     forward_ok = logits.ndim == 2 and logits.size(0) == x_norm.size(0)
     print(f"[INFO] forward_check={'PASS' if forward_ok else 'FAIL'} logits_shape={tuple(logits.shape)}")
     if not forward_ok:

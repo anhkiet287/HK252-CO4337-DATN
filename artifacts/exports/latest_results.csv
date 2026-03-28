@@ -1,0 +1,3 @@
+run_dir,checkpoint,seed,clean_acc,worst_acc,avg_acc,runtime_sec,num_attacks
+/workspaces/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_baseline_erm_seed42_eval,outputs/dev_fast/resnet18_dev_baseline_erm_seed42/checkpoints/best.pt,42,0.0,0.0,0.0,3.084485561999827,10
+outputs/dev_fast/resnet18_dev_baseline_erm_seed42_eval,outputs/dev_fast/resnet18_dev_baseline_erm_seed42/checkpoints/best.pt,42,0.0,0.0,0.0,3.084485561999827,10
