@@ -13,3 +13,7 @@ outputs/
 *.pt
 runs/
 models/*.tar
+.venv/
+outputs/
+runs/
+models/**/wandb_run_id.txt
