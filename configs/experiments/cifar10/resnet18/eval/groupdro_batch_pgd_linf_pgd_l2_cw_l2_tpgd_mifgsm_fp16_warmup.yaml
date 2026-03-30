@@ -17,6 +17,7 @@ train:
   groupdro:
     update_mode: batch
     eta_q: 1.0e-05
+    warmup_enabled: true
     warmup_epochs: 5
 eval:
   batch_size: 128

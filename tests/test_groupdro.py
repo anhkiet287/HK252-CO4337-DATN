@@ -64,6 +64,7 @@ def _make_groupdro_cfg(eta_q: float = 1.0, update_mode: str = "online") -> dict:
             "groupdro": {
                 "update_mode": update_mode,
                 "eta_q": eta_q,
+                "warmup_enabled": False,
                 "warmup_epochs": 0,
                 "selection_metric": "val/acc_worst",
             },
@@ -141,6 +142,7 @@ def test_groupdro_warmup_epochs_freeze_q_updates(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(groupdro_module, "build_attack", _fake_build_attack)
 
     cfg = _make_groupdro_cfg(eta_q=1.0)
+    cfg["train"]["groupdro"]["warmup_enabled"] = True
     cfg["train"]["groupdro"]["warmup_epochs"] = 3
     objective = GroupDRO(cfg, ZeroLogitModel())
     batch = {
@@ -155,6 +157,24 @@ def test_groupdro_warmup_epochs_freeze_q_updates(monkeypatch: pytest.MonkeyPatch
     assert torch.isfinite(loss)
     assert torch.allclose(objective.q, initial_q, atol=1e-6)
     assert metrics["q_g"] == pytest.approx(0.5, rel=1e-6)
+
+
+def test_groupdro_warmup_toggle_disables_freeze(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(groupdro_module, "build_attack", _fake_build_attack)
+
+    cfg = _make_groupdro_cfg(eta_q=1.0)
+    cfg["train"]["groupdro"]["warmup_enabled"] = False
+    cfg["train"]["groupdro"]["warmup_epochs"] = 3
+    objective = GroupDRO(cfg, ZeroLogitModel())
+    batch = {
+        "x": torch.zeros(2, 1, 2, 2),
+        "y": torch.tensor([0, 1], dtype=torch.long),
+        "group_id": torch.zeros(2, dtype=torch.long),
+    }
+
+    objective.compute_loss(objective.model, batch)
+
+    assert objective.q[0].item() > 0.5
 
 
 def test_groupdro_batch_mode_updates_observed_groups(monkeypatch: pytest.MonkeyPatch) -> None:

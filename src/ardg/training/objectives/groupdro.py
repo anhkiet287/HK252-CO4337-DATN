@@ -30,6 +30,7 @@ class GroupDRO(Objective):
         groupdro_cfg = cfg.get("train", {}).get("groupdro", {})
         self.eta_q = float(groupdro_cfg.get("eta_q", 0.02))
         self.warmup_epochs = max(0, int(groupdro_cfg.get("warmup_epochs", 0)))
+        self.warmup_enabled = bool(groupdro_cfg.get("warmup_enabled", self.warmup_epochs > 0))
         self.update_mode = str(groupdro_cfg.get("update_mode", "online")).strip().lower()
         if self.update_mode not in {"online", "batch"}:
             raise ValueError(
@@ -329,4 +330,6 @@ class GroupDRO(Objective):
         return sanitized or "group"
 
     def _q_updates_enabled(self) -> bool:
+        if not self.warmup_enabled:
+            return True
         return int(self.current_epoch) > int(self.warmup_epochs)
