@@ -20,7 +20,7 @@ train:
     eta_min: 0.0
   groupdro:
     update_mode: online
-    eta_q: 0.02
+    eta_q: 0.001
     selection_metric: val/acc_worst
     logging:
       plot_q_trajectory: true
