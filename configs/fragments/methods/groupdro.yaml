@@ -21,6 +21,7 @@ train:
   groupdro:
     update_mode: online
     eta_q: 0.001
+    warmup_epochs: 0
     selection_metric: val/acc_worst
     logging:
       plot_q_trajectory: true

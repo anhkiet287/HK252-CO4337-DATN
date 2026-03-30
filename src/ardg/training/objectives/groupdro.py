@@ -29,6 +29,7 @@ class GroupDRO(Objective):
         self.model = model
         groupdro_cfg = cfg.get("train", {}).get("groupdro", {})
         self.eta_q = float(groupdro_cfg.get("eta_q", 0.02))
+        self.warmup_epochs = max(0, int(groupdro_cfg.get("warmup_epochs", 0)))
         self.update_mode = str(groupdro_cfg.get("update_mode", "online")).strip().lower()
         if self.update_mode not in {"online", "batch"}:
             raise ValueError(
@@ -70,6 +71,7 @@ class GroupDRO(Objective):
         self.q_history: list[list[float]] = []
         self.q_history_steps: list[int] = []
         self._q_eps = 1e-12
+        self.current_epoch = 1
 
     def compute_loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, Any]]:
         images, labels, group_ids = self._extract_group_batch(batch)
@@ -103,18 +105,21 @@ class GroupDRO(Objective):
                 loss_group = torch.nn.functional.cross_entropy(logits, labels)
 
             q = self.q.to(device=labels.device, dtype=torch.float32)
-            loss_update = loss_group.detach().to(dtype=torch.float32)
-            if not torch.isfinite(loss_update):
-                raise RuntimeError(
-                    f"GroupDRO received non-finite loss_group for group '{self.group_names[group_id]}'."
-                )
-            # Update q in log-space so the multiplicative rule stays stable even when
-            # a hard attack produces a very large but finite CE loss.
-            log_q = torch.log(q.clamp_min(self._q_eps))
-            log_q[group_id] = log_q[group_id] + (self.eta_q * loss_update)
-            q = torch.softmax(log_q, dim=0)
-            if not torch.isfinite(q).all():
-                raise RuntimeError("GroupDRO q update produced non-finite weights.")
+            if not self._q_updates_enabled():
+                q = q / q.sum().clamp_min(self._q_eps)
+            else:
+                loss_update = loss_group.detach().to(dtype=torch.float32)
+                if not torch.isfinite(loss_update):
+                    raise RuntimeError(
+                        f"GroupDRO received non-finite loss_group for group '{self.group_names[group_id]}'."
+                    )
+                # Update q in log-space so the multiplicative rule stays stable even when
+                # a hard attack produces a very large but finite CE loss.
+                log_q = torch.log(q.clamp_min(self._q_eps))
+                log_q[group_id] = log_q[group_id] + (self.eta_q * loss_update)
+                q = torch.softmax(log_q, dim=0)
+                if not torch.isfinite(q).all():
+                    raise RuntimeError("GroupDRO q update produced non-finite weights.")
             self.q = q.detach()
 
             # Native GroupDRO uses the updated q[g] for the same step, but the weight is
@@ -154,21 +159,25 @@ class GroupDRO(Objective):
             group_loss_values: list[torch.Tensor] = []
             weighted_loss_terms: list[torch.Tensor] = []
             group_batch_counts: Dict[str, int] = {}
-            log_q = torch.log(q.clamp_min(self._q_eps))
             for group_id in group_list:
                 mask = group_ids == group_id
                 loss_group = per_sample_losses[mask].mean()
-                loss_update = loss_group.detach().to(dtype=torch.float32)
-                if not torch.isfinite(loss_update):
-                    raise RuntimeError(
-                        f"GroupDRO received non-finite loss_group for group '{self.group_names[group_id]}'."
-                    )
-                log_q[group_id] = log_q[group_id] + (self.eta_q * loss_update)
                 group_loss_values.append(loss_group)
                 group_batch_counts[self.group_names[group_id]] = int(mask.sum().item())
-            q = torch.softmax(log_q, dim=0)
-            if not torch.isfinite(q).all():
-                raise RuntimeError("GroupDRO q update produced non-finite weights.")
+            if not self._q_updates_enabled():
+                q = q / q.sum().clamp_min(self._q_eps)
+            else:
+                log_q = torch.log(q.clamp_min(self._q_eps))
+                for group_id, loss_group in zip(group_list, group_loss_values):
+                    loss_update = loss_group.detach().to(dtype=torch.float32)
+                    if not torch.isfinite(loss_update):
+                        raise RuntimeError(
+                            f"GroupDRO received non-finite loss_group for group '{self.group_names[group_id]}'."
+                        )
+                    log_q[group_id] = log_q[group_id] + (self.eta_q * loss_update)
+                q = torch.softmax(log_q, dim=0)
+                if not torch.isfinite(q).all():
+                    raise RuntimeError("GroupDRO q update produced non-finite weights.")
             self.q = q.detach()
 
             for group_id, loss_group in zip(group_list, group_loss_values):
@@ -243,7 +252,10 @@ class GroupDRO(Objective):
 
     def state_dict(self) -> Dict[str, Any]:
         # Checkpoints only need q to resume the paper update exactly.
-        return {"q": self.q.detach().cpu()}
+        return {
+            "q": self.q.detach().cpu(),
+            "current_epoch": int(self.current_epoch),
+        }
 
     def load_state_dict(self, state: Dict[str, Any]) -> None:
         q = state.get("q")
@@ -258,6 +270,16 @@ class GroupDRO(Objective):
         if not torch.isfinite(q_sum) or float(q_sum.item()) <= 0.0:
             raise ValueError("Checkpoint q must sum to a positive finite value.")
         self.q = q_tensor / q_sum
+        if state.get("current_epoch") is not None:
+            self.current_epoch = max(1, int(state["current_epoch"]))
+
+    def on_train_start(self, loaders: Dict[str, Any]) -> None:
+        del loaders
+        self.current_epoch = max(1, int(self.current_epoch))
+
+    def on_epoch_end(self, epoch: int, loaders: Dict[str, Any]) -> None:
+        del loaders
+        self.current_epoch = int(epoch) + 1
 
     def _extract_group_batch(self, batch: Any) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # Group ids must be provided explicitly by the GroupDRO loader.
@@ -305,3 +327,6 @@ class GroupDRO(Objective):
     def _sanitize_group_metric_name(name: str) -> str:
         sanitized = re.sub(r"[^0-9A-Za-z_]+", "_", str(name).strip()).strip("_").lower()
         return sanitized or "group"
+
+    def _q_updates_enabled(self) -> bool:
+        return int(self.current_epoch) > int(self.warmup_epochs)
