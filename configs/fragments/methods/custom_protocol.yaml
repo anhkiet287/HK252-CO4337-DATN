@@ -16,7 +16,7 @@ train:
 
 custom_protocol:
   name: checkpoint_base
-  warmup_epochs: 0
+  warmup_epochs: 5
   period_epochs: 2
   refresh_subset_size: 0.05
   score_metric: ce_loss

@@ -36,7 +36,8 @@ class CustomProtocol(Objective):
     def __init__(self, cfg: Dict[str, Any], model: Any) -> None:
         self.cfg = cfg
         self.model = model
-        self.logger = logging.getLogger(__name__)
+        run_logger_name = str(cfg.get("logging", {}).get("run_name", "") or "").strip()
+        self.logger = logging.getLogger(run_logger_name or __name__)
         self.proto_cfg = _resolve_custom_protocol_cfg(cfg)
         self.protocol_name = str(self.proto_cfg.get("name", "scaffold")).strip().lower()
         self.protocol_step = 0
@@ -185,6 +186,7 @@ class CustomProtocol(Objective):
         self.protocol_step += 1
         batch_size = int(labels.size(0))
         correct = int((logits.argmax(dim=1) == labels).sum().item())
+        domain_batch_counts = self._extract_attack_batch_counts(batch)
         metrics: Dict[str, float] = {
             "loss": float(loss.item()),
             "loss_adv": float(loss.item()),
@@ -192,6 +194,8 @@ class CustomProtocol(Objective):
             "acc_adv": correct / max(batch_size, 1),
             "correct": correct,
             "batch_size": batch_size,
+            "domain_name": "cached_mixed",
+            "domain_batch_counts": domain_batch_counts,
         }
         return loss, metrics
 
@@ -205,6 +209,7 @@ class CustomProtocol(Objective):
         attack_ids = self._sample_online_attack_ids(batch_size, device=labels.device)
         attacked = images.detach().clone()
         was_training = bool(model.training)
+        domain_batch_counts = self._count_attack_ids(attack_ids)
         try:
             model.eval()
             for attack_idx in torch.unique(attack_ids).detach().cpu().tolist():
@@ -228,6 +233,8 @@ class CustomProtocol(Objective):
             "correct": correct,
             "batch_size": batch_size,
             "warmup_online": 1.0,
+            "domain_name": "warmup_online",
+            "domain_batch_counts": domain_batch_counts,
         }
         return loss, metrics
 
@@ -577,7 +584,7 @@ class CustomProtocol(Objective):
         except ImportError:
             return
         if getattr(wandb, "run", None) is not None:
-            wandb.log(metrics)
+            wandb.log(metrics, step=self.protocol_step)
 
     def _q_entropy(self) -> torch.Tensor:
         q = self.q.clamp_min(1e-12)
@@ -591,6 +598,21 @@ class CustomProtocol(Objective):
         probs = probs / probs.sum().clamp_min(1e-12)
         sampled = torch.multinomial(probs, num_samples=int(batch_size), replacement=True)
         return sampled.to(device=device, dtype=torch.long)
+
+    def _count_attack_ids(self, attack_ids: torch.Tensor) -> Dict[str, int]:
+        counts = {name: 0 for name in self.attack_names}
+        for attack_idx in attack_ids.detach().view(-1).cpu().tolist():
+            if 0 <= int(attack_idx) < self.num_groups:
+                counts[self.attack_names[int(attack_idx)]] += 1
+        return counts
+
+    def _extract_attack_batch_counts(self, batch: Any) -> Dict[str, int]:
+        if not isinstance(batch, dict) or "attack_id" not in batch:
+            return {}
+        attack_ids = batch["attack_id"]
+        if not torch.is_tensor(attack_ids):
+            attack_ids = torch.as_tensor(attack_ids, dtype=torch.long)
+        return self._count_attack_ids(attack_ids.to(dtype=torch.long))
 
     def consume_train_time_seconds(self) -> float:
         extra = float(self._pending_train_time_sec)
