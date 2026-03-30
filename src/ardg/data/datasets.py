@@ -151,6 +151,31 @@ def get_dataloaders(cfg: dict) -> Tuple[Any, Any, Any]:
                 num_workers=num_workers,
                 pin_memory=pin,
             )
+    elif _use_checkpoint_base_v2_loader(cfg) and _has_groupdro_train_domains(cfg):
+        num_groups = _resolve_groupdro_num_groups(cfg)
+        grouped_train = RepeatedGroupDataset(train_subset, num_groups=num_groups)
+        if _resolve_checkpoint_base_v2_update_mode(cfg) == "online":
+            batch_sampler = GroupHomogeneousBatchSampler(
+                base_size=len(train_subset),
+                num_groups=num_groups,
+                batch_size=batch_size,
+                shuffle=True,
+                drop_last=False,
+            )
+            train_loader = DataLoader(
+                grouped_train,
+                batch_sampler=batch_sampler,
+                num_workers=num_workers,
+                pin_memory=pin,
+            )
+        else:
+            train_loader = DataLoader(
+                grouped_train,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=num_workers,
+                pin_memory=pin,
+            )
     else:
         train_loader = DataLoader(
             train_subset,
@@ -221,4 +246,34 @@ def _use_checkpoint_base_cache_dataset(cfg: dict) -> bool:
         return False
     proto_cfg = _resolve_custom_protocol_cfg(cfg)
     name = str(proto_cfg.get("name", "")).strip().lower()
-    return name == "checkpoint_base"
+    version = _resolve_checkpoint_base_version(proto_cfg)
+    return name == "checkpoint_base" and version == "v1"
+
+
+def _use_checkpoint_base_v2_loader(cfg: dict) -> bool:
+    mode = str(cfg.get("train", {}).get("mode", "")).lower()
+    if mode not in {"custom_protocol", "custom-protocol"}:
+        return False
+    proto_cfg = _resolve_custom_protocol_cfg(cfg)
+    name = str(proto_cfg.get("name", "")).strip().lower()
+    version = _resolve_checkpoint_base_version(proto_cfg)
+    return name == "checkpoint_base" and version == "v2"
+
+
+def _resolve_checkpoint_base_version(proto_cfg: dict) -> str:
+    version = str(proto_cfg.get("version", "v1")).strip().lower()
+    if version not in {"v1", "v2"}:
+        raise ValueError(
+            f"Unsupported custom_protocol.version={version!r}. Use 'v1' or 'v2'."
+        )
+    return version
+
+
+def _resolve_checkpoint_base_v2_update_mode(cfg: dict) -> str:
+    proto_cfg = _resolve_custom_protocol_cfg(cfg)
+    update_mode = str(proto_cfg.get("update_mode", "online")).strip().lower()
+    if update_mode not in {"online", "batch"}:
+        raise ValueError(
+            f"Unsupported custom_protocol.update_mode={update_mode!r}. Use 'online' or 'batch'."
+        )
+    return update_mode

@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 
 from ardg.attacks.attack_suite import build_train_attack, build_train_suite
 from ardg.data.checkpoint_cache import CheckpointCacheDataset, CleanIndexDataset
+from ardg.data.grouping import RepeatedGroupDataset
 from ardg.training.losses import compute_loss
 from ardg.training.objectives.base import Objective
 from ardg.utils.batch import unpack_xy
@@ -40,6 +41,11 @@ class CustomProtocol(Objective):
         self.logger = logging.getLogger(run_logger_name or __name__)
         self.proto_cfg = _resolve_custom_protocol_cfg(cfg)
         self.protocol_name = str(self.proto_cfg.get("name", "scaffold")).strip().lower()
+        self.protocol_version = str(self.proto_cfg.get("version", "v1")).strip().lower()
+        if self.protocol_name == "checkpoint_base" and self.protocol_version not in {"v1", "v2"}:
+            raise ValueError(
+                f"Unsupported custom_protocol.version={self.protocol_version!r}. Use 'v1' or 'v2'."
+            )
         self.protocol_step = 0
 
         if self.protocol_name == "checkpoint_base":
@@ -69,6 +75,7 @@ class CustomProtocol(Objective):
 
         self.period_epochs = max(1, int(self.proto_cfg.get("period_epochs", 2)))
         self.warmup_epochs = max(0, int(self.proto_cfg.get("warmup_epochs", 0)))
+        self.warmup_enabled = bool(self.proto_cfg.get("warmup_enabled", self.warmup_epochs > 0))
         self.score_metric = str(self.proto_cfg.get("score_metric", "ce_loss")).strip().lower()
         if self.score_metric != "ce_loss":
             raise ValueError(
@@ -100,19 +107,26 @@ class CustomProtocol(Objective):
         self.refresh_subset_indices: list[int] = []
         self.refresh_subset_count = 0
 
-        self.cache_dataset: CheckpointCacheDataset | None = None
         self.generation_batch_size = int(self.cfg.get("train", {}).get("batch_size", 128))
         self.current_period_idx = -1
         self.current_period_start_epoch = 0
         self.current_period_end_epoch = 0
         self.current_epoch = 1
-        self.current_cache_manifest: Dict[str, Any] = {}
         self.latest_scores: Dict[str, float] = {name: 0.0 for name in self.attack_names}
-        self.latest_cache_counts: Dict[str, int] = {name: 0 for name in self.attack_names}
         self.latest_refresh_score_time_sec = 0.0
-        self.latest_cache_generate_time_sec = 0.0
         self._pending_train_time_sec = 0.0
         self.seed = int(self.cfg.get("experiment", {}).get("seed", 0))
+        self.update_mode = str(self.proto_cfg.get("update_mode", "online")).strip().lower()
+        if self.protocol_version == "v2" and self.update_mode not in {"online", "batch"}:
+            raise ValueError(
+                f"checkpoint_base v2 only supports update_mode='online' or 'batch', got {self.update_mode!r}."
+            )
+
+        self.cache_dataset: CheckpointCacheDataset | None = None
+        self.clean_train_dataset: Any | None = None
+        self.current_cache_manifest: Dict[str, Any] = {}
+        self.latest_cache_counts: Dict[str, int] = {name: 0 for name in self.attack_names}
+        self.latest_cache_generate_time_sec = 0.0
 
     def _resolve_cache_directory(self, directory: str) -> str:
         path = Path(directory)
@@ -140,7 +154,9 @@ class CustomProtocol(Objective):
 
     def compute_loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
         if self.protocol_name == "checkpoint_base":
-            return self._compute_checkpoint_base_loss(model, batch)
+            if self.protocol_version == "v1":
+                return self._compute_checkpoint_base_v1_loss(model, batch)
+            return self._compute_checkpoint_base_v2_loss(model, batch)
 
         images, labels, used_adv = self._prepare_inputs(model, batch)
         with self.autocast_context():
@@ -166,7 +182,7 @@ class CustomProtocol(Objective):
         }
         return total_loss, metrics
 
-    def _compute_checkpoint_base_loss(
+    def _compute_checkpoint_base_v1_loss(
         self,
         model: Any,
         batch: Any,
@@ -245,7 +261,11 @@ class CustomProtocol(Objective):
     def on_train_start(self, loaders: Dict[str, Any]) -> None:
         if self.protocol_name != "checkpoint_base":
             return None
+        if self.protocol_version == "v1":
+            return self._on_train_start_checkpoint_base_v1(loaders)
+        return self._on_train_start_checkpoint_base_v2(loaders)
 
+    def _on_train_start_checkpoint_base_v1(self, loaders: Dict[str, Any]) -> None:
         train_loader = loaders.get("train")
         if train_loader is None or not hasattr(train_loader, "dataset"):
             raise ValueError("checkpoint_base requires access to the training DataLoader.")
@@ -297,7 +317,11 @@ class CustomProtocol(Objective):
         del loaders
         if self.protocol_name != "checkpoint_base":
             return None
+        if self.protocol_version == "v1":
+            return self._on_epoch_end_checkpoint_base_v1(epoch)
+        return self._on_epoch_end_checkpoint_base_v2(epoch)
 
+    def _on_epoch_end_checkpoint_base_v1(self, epoch: int) -> None:
         total_epochs = int(self.cfg.get("train", {}).get("epochs", epoch))
         if epoch >= total_epochs:
             self.current_epoch = int(epoch) + 1
@@ -358,10 +382,183 @@ class CustomProtocol(Objective):
         self.current_epoch = int(epoch) + 1
         return None
 
+    def _on_train_start_checkpoint_base_v2(self, loaders: Dict[str, Any]) -> None:
+        train_loader = loaders.get("train")
+        if train_loader is None or not hasattr(train_loader, "dataset"):
+            raise ValueError("checkpoint_base v2 requires access to the training DataLoader.")
+        if getattr(train_loader, "batch_size", None):
+            self.generation_batch_size = int(train_loader.batch_size)
+
+        self.clean_train_dataset = self._resolve_clean_train_dataset(train_loader.dataset)
+        if not self.refresh_subset_indices:
+            self.refresh_subset_indices = self._build_refresh_subset_indices(len(self._require_clean_train_dataset()))
+            self.refresh_subset_count = len(self.refresh_subset_indices)
+
+        if self.current_period_idx >= 0 or self.current_period_end_epoch > 0:
+            return None
+
+        total_epochs = int(self.cfg.get("train", {}).get("epochs", self.period_epochs))
+        if self._checkpoint_base_warmup_active():
+            return None
+
+        self.current_period_idx = 0
+        self.current_period_start_epoch = 1
+        self.current_period_end_epoch = min(self.period_epochs, total_epochs)
+        return None
+
+    def _on_epoch_end_checkpoint_base_v2(self, epoch: int) -> None:
+        total_epochs = int(self.cfg.get("train", {}).get("epochs", epoch))
+        if epoch >= total_epochs:
+            self.current_epoch = int(epoch) + 1
+            return None
+
+        if self._checkpoint_base_warmup_active():
+            if epoch < self.warmup_epochs:
+                self.current_epoch = int(epoch) + 1
+                return None
+
+            scores = self._score_attacks_on_refresh_subset()
+            self._update_q_from_scores(scores)
+            self.current_period_idx = 0
+            self.current_period_start_epoch = epoch + 1
+            self.current_period_end_epoch = min(
+                self.current_period_start_epoch + self.period_epochs - 1,
+                total_epochs,
+            )
+            self.latest_scores = scores
+            self._emit_boundary_metrics(event="post_warmup_period_start")
+            self.current_epoch = int(epoch) + 1
+            return None
+
+        if self.current_period_idx < 0:
+            self.current_period_idx = 0
+            self.current_period_start_epoch = 1
+            self.current_period_end_epoch = min(self.period_epochs, total_epochs)
+
+        if epoch != self.current_period_end_epoch:
+            self.current_epoch = int(epoch) + 1
+            return None
+
+        scores = self._score_attacks_on_refresh_subset()
+        self._update_q_from_scores(scores)
+        self.current_period_idx += 1
+        self.current_period_start_epoch = epoch + 1
+        self.current_period_end_epoch = min(
+            self.current_period_start_epoch + self.period_epochs - 1,
+            total_epochs,
+        )
+        self.latest_scores = scores
+        self._emit_boundary_metrics(event="period_refresh")
+        self.current_epoch = int(epoch) + 1
+        return None
+
+    def _compute_checkpoint_base_v2_loss(
+        self,
+        model: Any,
+        batch: Any,
+    ) -> Tuple[torch.Tensor, Dict[str, float]]:
+        images, labels, group_ids = self._extract_group_batch(batch)
+        unique_groups = torch.unique(group_ids)
+        batch_size = int(labels.size(0))
+        group_list = [int(group_id) for group_id in unique_groups.detach().cpu().tolist()]
+        for group_id in group_list:
+            if group_id < 0 or group_id >= self.num_groups:
+                raise ValueError(
+                    f"checkpoint_base v2 received group_id={group_id}, "
+                    f"but configured groups are in [0, {self.num_groups - 1}]."
+                )
+
+        q = self.q.to(device=labels.device, dtype=torch.float32)
+        q = q / q.sum().clamp_min(1e-12)
+        warmup_active = self._checkpoint_base_warmup_active()
+        warmup_tag = f"warmup_{self.update_mode}"
+
+        if self.update_mode == "online":
+            if int(unique_groups.numel()) != 1:
+                raise ValueError(
+                    "checkpoint_base v2 online mode expects each optimizer step to receive exactly one group, "
+                    f"but got multiple group_ids={unique_groups.detach().cpu().tolist()}."
+                )
+            group_id = int(unique_groups.item())
+            attacked = self._apply_group_attack(model, images, labels, group_id)
+            with self.full_precision_context():
+                logits = model(attacked)
+                loss_group = torch.nn.functional.cross_entropy(logits, labels)
+
+            weighted_loss = q[group_id].detach() * loss_group
+            correct = int((logits.argmax(dim=1) == labels).sum().item())
+            domain_name = warmup_tag if warmup_active else self.attack_names[group_id]
+            metrics: Dict[str, float] = {
+                "loss": float(weighted_loss.item()),
+                "loss_adv": float(weighted_loss.item()),
+                "acc": correct / max(batch_size, 1),
+                "acc_adv": correct / max(batch_size, 1),
+                "correct": correct,
+                "batch_size": batch_size,
+                "group_id": float(group_id),
+                "loss_group": float(loss_group.item()),
+                "domain_name": domain_name,
+                "domain_batch_counts": {self.attack_names[group_id]: batch_size},
+            }
+        else:
+            attacked = images.clone()
+            group_loss_values: list[torch.Tensor] = []
+            weighted_terms: list[torch.Tensor] = []
+            domain_batch_counts: Dict[str, int] = {}
+            for group_id in group_list:
+                mask = group_ids == group_id
+                attacked_subset = self._apply_group_attack(model, images[mask], labels[mask], group_id)
+                attacked[mask] = attacked_subset
+            with self.full_precision_context():
+                logits = model(attacked)
+                per_sample_losses = torch.nn.functional.cross_entropy(logits, labels, reduction="none")
+
+            for group_id in group_list:
+                mask = group_ids == group_id
+                loss_group = per_sample_losses[mask].mean()
+                group_loss_values.append(loss_group)
+                weighted_terms.append(q[group_id].detach() * loss_group)
+                domain_batch_counts[self.attack_names[group_id]] = int(mask.sum().item())
+
+            weighted_loss = torch.stack(weighted_terms).sum()
+            mean_group_loss = torch.stack(group_loss_values).mean()
+            correct = int((logits.argmax(dim=1) == labels).sum().item())
+            metrics = {
+                "loss": float(weighted_loss.item()),
+                "loss_adv": float(weighted_loss.item()),
+                "acc": correct / max(batch_size, 1),
+                "acc_adv": correct / max(batch_size, 1),
+                "correct": correct,
+                "batch_size": batch_size,
+                "loss_group": float(mean_group_loss.item()),
+                "domain_name": warmup_tag if warmup_active else "mixed",
+                "domain_batch_counts": domain_batch_counts,
+            }
+
+        if warmup_active:
+            metrics["warmup_active"] = 1.0
+        for attack_idx, attack_name in enumerate(self.attack_names):
+            metrics[f"q/{attack_name}"] = float(q[attack_idx].item())
+        self.protocol_step += 1
+        return weighted_loss, metrics
+
     def _require_cache_dataset(self) -> CheckpointCacheDataset:
         if self.cache_dataset is None:
             raise RuntimeError("checkpoint_base cache dataset is not attached yet.")
         return self.cache_dataset
+
+    def _require_clean_train_dataset(self) -> Any:
+        if self.clean_train_dataset is None:
+            raise RuntimeError("checkpoint_base v2 clean training dataset is not attached yet.")
+        return self.clean_train_dataset
+
+    def _resolve_clean_train_dataset(self, dataset: Any) -> Any:
+        current = dataset
+        while isinstance(current, RepeatedGroupDataset):
+            current = current.base
+        if isinstance(current, CheckpointCacheDataset):
+            return current.base
+        return current
 
     def _build_refresh_subset_indices(self, num_samples: int) -> list[int]:
         if num_samples <= 0:
@@ -378,7 +575,11 @@ class CustomProtocol(Objective):
         return [int(idx) for idx in order[:count]]
 
     def _score_attacks_on_refresh_subset(self) -> Dict[str, float]:
-        dataset = self._require_cache_dataset()
+        dataset = (
+            self._require_cache_dataset()
+            if self.protocol_version == "v1"
+            else self._require_clean_train_dataset()
+        )
         was_training = bool(self.model.training)
         device = self._model_device()
         scores: Dict[str, float] = {}
@@ -450,6 +651,43 @@ class CustomProtocol(Objective):
         generator.manual_seed(self.seed + 1000 + int(period_idx))
         perm = torch.randperm(num_samples, generator=generator)
         return attack_ids[perm]
+
+    def _extract_group_batch(self, batch: Any) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if isinstance(batch, dict):
+            if "x" not in batch or "y" not in batch:
+                raise ValueError("checkpoint_base v2 expects batch dicts with 'x' and 'y'.")
+            if "group_id" not in batch:
+                raise ValueError("checkpoint_base v2 requires explicit batch['group_id'].")
+            images = batch["x"]
+            labels = batch["y"]
+            group_ids = batch["group_id"]
+        elif isinstance(batch, (list, tuple)) and len(batch) >= 3:
+            images, labels, group_ids = batch[0], batch[1], batch[2]
+        else:
+            raise ValueError(
+                "checkpoint_base v2 requires group ids as a third tuple item or in batch['group_id']."
+            )
+
+        if not torch.is_tensor(group_ids):
+            group_ids = torch.as_tensor(group_ids, device=labels.device)
+        group_ids = group_ids.to(device=labels.device, dtype=torch.long).view(-1)
+        return images, labels, group_ids
+
+    def _apply_group_attack(
+        self,
+        model: Any,
+        images: torch.Tensor,
+        labels: torch.Tensor,
+        group_id: int,
+    ) -> torch.Tensor:
+        attack = self.attacks[group_id]
+        was_training = bool(model.training)
+        model.eval()
+        try:
+            with self.full_precision_context():
+                return attack(images, labels).detach()
+        finally:
+            model.train(was_training)
 
     def _generate_period_cache(
         self,
@@ -547,6 +785,7 @@ class CustomProtocol(Objective):
         if self.protocol_name != "checkpoint_base":
             return
         metrics: Dict[str, Any] = {
+            "checkpoint_base/version": self.protocol_version,
             "checkpoint_base/event": str(event),
             "checkpoint_base/period_idx": int(self.current_period_idx),
             "checkpoint_base/period_start_epoch": int(self.current_period_start_epoch),
@@ -554,28 +793,49 @@ class CustomProtocol(Objective):
             "checkpoint_base/q_entropy": float(self._q_entropy().item()),
             "checkpoint_base/refresh_subset_size": int(self.refresh_subset_count or len(self.refresh_subset_indices)),
             "checkpoint_base/refresh_score_time_sec": float(self.latest_refresh_score_time_sec),
-            "checkpoint_base/cache_generate_time_sec": float(self.latest_cache_generate_time_sec),
+            "checkpoint_base/warmup_epochs": int(self.warmup_epochs),
         }
+        if self.protocol_version == "v2":
+            metrics["checkpoint_base/update_mode"] = self.update_mode
+        else:
+            metrics["checkpoint_base/cache_generate_time_sec"] = float(self.latest_cache_generate_time_sec)
         for attack_idx, attack_name in enumerate(self.attack_names):
             metrics[f"checkpoint_base/q/{attack_name}"] = float(self.q[attack_idx].item())
             metrics[f"checkpoint_base/score/{attack_name}"] = float(self.latest_scores.get(attack_name, 0.0))
-            metrics[f"checkpoint_base/cache_count/{attack_name}"] = int(self.latest_cache_counts.get(attack_name, 0))
+            if self.protocol_version == "v1":
+                metrics[f"checkpoint_base/cache_count/{attack_name}"] = int(self.latest_cache_counts.get(attack_name, 0))
 
-        self.logger.info(
-            "checkpoint_base event=%s period=%s epochs=%s-%s refresh_subset=%s "
-            "refresh_score_time_sec=%.3f cache_generate_time_sec=%.3f cache_path=%s",
-            event,
-            self.current_period_idx,
-            self.current_period_start_epoch,
-            self.current_period_end_epoch,
-            int(self.refresh_subset_count or len(self.refresh_subset_indices)),
-            self.latest_refresh_score_time_sec,
-            self.latest_cache_generate_time_sec,
-            self.current_cache_manifest.get("path"),
-        )
+        if self.protocol_version == "v1":
+            self.logger.info(
+                "checkpoint_base version=%s event=%s period=%s epochs=%s-%s refresh_subset=%s "
+                "refresh_score_time_sec=%.3f cache_generate_time_sec=%.3f cache_path=%s",
+                self.protocol_version,
+                event,
+                self.current_period_idx,
+                self.current_period_start_epoch,
+                self.current_period_end_epoch,
+                int(self.refresh_subset_count or len(self.refresh_subset_indices)),
+                self.latest_refresh_score_time_sec,
+                self.latest_cache_generate_time_sec,
+                self.current_cache_manifest.get("path"),
+            )
+        else:
+            self.logger.info(
+                "checkpoint_base version=%s update_mode=%s event=%s period=%s epochs=%s-%s refresh_subset=%s "
+                "refresh_score_time_sec=%.3f",
+                self.protocol_version,
+                self.update_mode,
+                event,
+                self.current_period_idx,
+                self.current_period_start_epoch,
+                self.current_period_end_epoch,
+                int(self.refresh_subset_count or len(self.refresh_subset_indices)),
+                self.latest_refresh_score_time_sec,
+            )
         self.logger.info("checkpoint_base q=%s", {name: float(self.q[idx].item()) for idx, name in enumerate(self.attack_names)})
         self.logger.info("checkpoint_base scores=%s", dict(self.latest_scores))
-        self.logger.info("checkpoint_base cache_counts=%s", dict(self.latest_cache_counts))
+        if self.protocol_version == "v1":
+            self.logger.info("checkpoint_base cache_counts=%s", dict(self.latest_cache_counts))
         wandb_cfg = self.cfg.get("logging", {}).get("wandb", {})
         if not bool(wandb_cfg.get("enabled", False)):
             return
@@ -591,6 +851,8 @@ class CustomProtocol(Objective):
         return -(q * q.log()).sum()
 
     def _checkpoint_base_warmup_active(self) -> bool:
+        if not self.warmup_enabled:
+            return False
         return int(self.current_epoch) <= int(self.warmup_epochs)
 
     def _sample_online_attack_ids(self, batch_size: int, *, device: torch.device) -> torch.Tensor:
@@ -630,12 +892,14 @@ class CustomProtocol(Objective):
             return {"protocol_step": int(self.protocol_step)}
         return {
             "protocol_name": self.protocol_name,
+            "protocol_version": self.protocol_version,
             "protocol_step": int(self.protocol_step),
             "q": self.q.detach().cpu(),
             "period_idx": int(self.current_period_idx),
             "period_start_epoch": int(self.current_period_start_epoch),
             "period_end_epoch": int(self.current_period_end_epoch),
             "current_epoch": int(self.current_epoch),
+            "warmup_enabled": bool(self.warmup_enabled),
             "refresh_subset_indices": [int(idx) for idx in self.refresh_subset_indices],
             "refresh_subset_count": int(self.refresh_subset_count or len(self.refresh_subset_indices)),
             "current_cache_manifest": dict(self.current_cache_manifest),
@@ -651,6 +915,12 @@ class CustomProtocol(Objective):
             if state.get("protocol_step") is not None:
                 self.protocol_step = int(state["protocol_step"])
             return None
+
+        state_version = str(state.get("protocol_version", self.protocol_version)).strip().lower()
+        if state_version and state_version != self.protocol_version:
+            raise ValueError(
+                f"checkpoint_base checkpoint version {state_version!r} does not match current config version {self.protocol_version!r}."
+            )
 
         if state.get("protocol_step") is not None:
             self.protocol_step = int(state["protocol_step"])
@@ -674,6 +944,8 @@ class CustomProtocol(Objective):
             self.current_period_end_epoch = int(state["period_end_epoch"])
         if state.get("current_epoch") is not None:
             self.current_epoch = int(state["current_epoch"])
+        if state.get("warmup_enabled") is not None:
+            self.warmup_enabled = bool(state["warmup_enabled"])
         if isinstance(state.get("refresh_subset_indices"), list):
             self.refresh_subset_indices = [int(idx) for idx in state["refresh_subset_indices"]]
         if state.get("refresh_subset_count") is not None:

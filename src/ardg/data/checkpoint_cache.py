@@ -121,9 +121,9 @@ class CheckpointCacheDataset(Dataset):
 
 
 class CleanIndexDataset(Dataset):
-    """View clean samples from a wrapped dataset for a fixed list of indices."""
+    """View clean samples from a dataset for a fixed list of indices."""
 
-    def __init__(self, dataset: CheckpointCacheDataset, indices: Sequence[int]) -> None:
+    def __init__(self, dataset: Dataset, indices: Sequence[int]) -> None:
         self.dataset = dataset
         self.indices = [int(idx) for idx in indices]
 
@@ -132,7 +132,17 @@ class CleanIndexDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:  # type: ignore[override]
         sample_idx = self.indices[int(idx)]
-        image, label = self.dataset.get_clean_item(sample_idx)
+        get_clean_item = getattr(self.dataset, "get_clean_item", None)
+        if callable(get_clean_item):
+            image, label = get_clean_item(sample_idx)
+        else:
+            sample = self.dataset[int(sample_idx)]
+            if isinstance(sample, dict):
+                image, label = sample["x"], sample["y"]
+            elif isinstance(sample, (list, tuple)) and len(sample) >= 2:
+                image, label = sample[0], sample[1]
+            else:
+                raise ValueError("Unsupported clean sample format for refresh-subset view.")
         if not torch.is_tensor(label):
             label = torch.tensor(int(label), dtype=torch.long)
         else:

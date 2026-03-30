@@ -1,0 +1,20 @@
+_base_:
+  - ../../../../fragments/experiment/common.yaml
+  - ../../../../fragments/datasets/cifar10.yaml
+  - ../../../../fragments/models/resnet18.yaml
+  - ../../../../fragments/methods/custom_protocol.yaml
+  - ../../../../fragments/attacks/heldout_pgd_tpgd_mifgsm.yaml
+  - ../../../../fragments/logging/wandb_required.yaml
+
+experiment:
+  name: proposed_checkpoint_base_v2_pgd_tpgd_mifgsm
+dataset:
+  augmentation: standard
+train:
+  batch_size: 256
+eval:
+  batch_size: 128
+custom_protocol:
+  name: checkpoint_base
+  version: v2
+  update_mode: online
