@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import time
 from typing import Any, Dict, Sequence, Tuple
 
 import torch
@@ -66,6 +67,7 @@ class CustomProtocol(Objective):
         self.q = torch.full((self.num_groups,), 1.0 / float(self.num_groups), dtype=torch.float32)
 
         self.period_epochs = max(1, int(self.proto_cfg.get("period_epochs", 2)))
+        self.warmup_epochs = max(0, int(self.proto_cfg.get("warmup_epochs", 0)))
         self.score_metric = str(self.proto_cfg.get("score_metric", "ce_loss")).strip().lower()
         if self.score_metric != "ce_loss":
             raise ValueError(
@@ -102,9 +104,13 @@ class CustomProtocol(Objective):
         self.current_period_idx = -1
         self.current_period_start_epoch = 0
         self.current_period_end_epoch = 0
+        self.current_epoch = 1
         self.current_cache_manifest: Dict[str, Any] = {}
         self.latest_scores: Dict[str, float] = {name: 0.0 for name in self.attack_names}
         self.latest_cache_counts: Dict[str, int] = {name: 0 for name in self.attack_names}
+        self.latest_refresh_score_time_sec = 0.0
+        self.latest_cache_generate_time_sec = 0.0
+        self._pending_train_time_sec = 0.0
         self.seed = int(self.cfg.get("experiment", {}).get("seed", 0))
 
     def _resolve_cache_directory(self, directory: str) -> str:
@@ -164,6 +170,13 @@ class CustomProtocol(Objective):
         model: Any,
         batch: Any,
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
+        if self._checkpoint_base_warmup_active():
+            return self._compute_checkpoint_base_warmup_loss(model, batch)
+        dataset = self._require_cache_dataset()
+        if not dataset.has_active_cache():
+            raise RuntimeError(
+                "checkpoint_base expected a cached attacked dataset after warmup, but no cache is active."
+            )
         images, labels = unpack_xy(batch)
         with self.autocast_context():
             logits = model(images)
@@ -179,6 +192,42 @@ class CustomProtocol(Objective):
             "acc_adv": correct / max(batch_size, 1),
             "correct": correct,
             "batch_size": batch_size,
+        }
+        return loss, metrics
+
+    def _compute_checkpoint_base_warmup_loss(
+        self,
+        model: Any,
+        batch: Any,
+    ) -> Tuple[torch.Tensor, Dict[str, float]]:
+        images, labels = unpack_xy(batch)
+        batch_size = int(labels.size(0))
+        attack_ids = self._sample_online_attack_ids(batch_size, device=labels.device)
+        attacked = images.detach().clone()
+        was_training = bool(model.training)
+        try:
+            model.eval()
+            for attack_idx in torch.unique(attack_ids).detach().cpu().tolist():
+                mask = attack_ids == int(attack_idx)
+                with self.full_precision_context():
+                    attacked[mask] = self.attacks[int(attack_idx)](images[mask], labels[mask]).detach()
+        finally:
+            model.train(was_training)
+
+        with self.autocast_context():
+            logits = model(attacked)
+            loss = compute_loss(logits, labels)
+
+        self.protocol_step += 1
+        correct = int((logits.argmax(dim=1) == labels).sum().item())
+        metrics: Dict[str, float] = {
+            "loss": float(loss.item()),
+            "loss_adv": float(loss.item()),
+            "acc": correct / max(batch_size, 1),
+            "acc_adv": correct / max(batch_size, 1),
+            "correct": correct,
+            "batch_size": batch_size,
+            "warmup_online": 1.0,
         }
         return loss, metrics
 
@@ -214,6 +263,13 @@ class CustomProtocol(Objective):
             self._load_current_cache_from_disk()
             return None
 
+        if self._checkpoint_base_warmup_active():
+            self.logger.info(
+                "checkpoint_base warmup active for epochs 1-%s; using online adversarial generation before cache periods.",
+                self.warmup_epochs,
+            )
+            return None
+
         total_epochs = int(self.cfg.get("train", {}).get("epochs", self.period_epochs))
         self.current_period_idx = 0
         self.current_period_start_epoch = 1
@@ -227,18 +283,50 @@ class CustomProtocol(Objective):
         )
         self.latest_scores = {name: 0.0 for name in self.attack_names}
         self.latest_cache_counts = dict(self.current_cache_manifest.get("cache_counts", {}))
-        self._emit_boundary_metrics()
+        self._emit_boundary_metrics(event="initial_cache")
         return None
 
     def on_epoch_end(self, epoch: int, loaders: Dict[str, Any]) -> None:
         del loaders
         if self.protocol_name != "checkpoint_base":
             return None
-        if epoch != self.current_period_end_epoch:
-            return None
 
         total_epochs = int(self.cfg.get("train", {}).get("epochs", epoch))
         if epoch >= total_epochs:
+            self.current_epoch = int(epoch) + 1
+            return None
+
+        if self._checkpoint_base_warmup_active():
+            if epoch < self.warmup_epochs:
+                self.current_epoch = int(epoch) + 1
+                return None
+
+            scores = self._score_attacks_on_refresh_subset()
+            self._update_q_from_scores(scores)
+            self.current_period_idx = 0
+            self.current_period_start_epoch = epoch + 1
+            self.current_period_end_epoch = min(
+                self.current_period_start_epoch + self.period_epochs - 1,
+                total_epochs,
+            )
+            attack_ids = self._allocate_attack_ids(
+                len(self._require_cache_dataset()),
+                period_idx=self.current_period_idx,
+            )
+            self.current_cache_manifest = self._generate_period_cache(
+                attack_ids,
+                period_idx=self.current_period_idx,
+                period_start_epoch=self.current_period_start_epoch,
+                period_end_epoch=self.current_period_end_epoch,
+            )
+            self.latest_scores = scores
+            self.latest_cache_counts = dict(self.current_cache_manifest.get("cache_counts", {}))
+            self._emit_boundary_metrics(event="post_warmup_initial_cache")
+            self.current_epoch = int(epoch) + 1
+            return None
+
+        if epoch != self.current_period_end_epoch:
+            self.current_epoch = int(epoch) + 1
             return None
 
         scores = self._score_attacks_on_refresh_subset()
@@ -259,7 +347,8 @@ class CustomProtocol(Objective):
         )
         self.latest_scores = scores
         self.latest_cache_counts = dict(self.current_cache_manifest.get("cache_counts", {}))
-        self._emit_boundary_metrics()
+        self._emit_boundary_metrics(event="period_refresh")
+        self.current_epoch = int(epoch) + 1
         return None
 
     def _require_cache_dataset(self) -> CheckpointCacheDataset:
@@ -286,6 +375,7 @@ class CustomProtocol(Objective):
         was_training = bool(self.model.training)
         device = self._model_device()
         scores: Dict[str, float] = {}
+        start = time.perf_counter()
         try:
             self.model.eval()
             for attack_idx, attack_name in enumerate(self.attack_names):
@@ -312,6 +402,7 @@ class CustomProtocol(Objective):
                 scores[attack_name] = total_loss / max(total_seen, 1)
         finally:
             self.model.train(was_training)
+        self.latest_refresh_score_time_sec = time.perf_counter() - start
         return scores
 
     def _update_q_from_scores(self, scores: Dict[str, float]) -> None:
@@ -369,6 +460,7 @@ class CustomProtocol(Objective):
         cache_counts = {name: 0 for name in self.attack_names}
         device = self._model_device()
         was_training = bool(self.model.training)
+        start = time.perf_counter()
 
         try:
             self.model.eval()
@@ -420,6 +512,8 @@ class CustomProtocol(Objective):
             ensure_dir(self.cache_directory)
             cache_path = dataset.save_cache(self._cache_file_path(period_idx), metadata=metadata)
 
+        self.latest_cache_generate_time_sec = time.perf_counter() - start
+        self._pending_train_time_sec += self.latest_cache_generate_time_sec
         manifest = dict(metadata)
         manifest["path"] = cache_path
         return manifest
@@ -442,22 +536,39 @@ class CustomProtocol(Objective):
             self.current_cache_manifest.setdefault("period_start_epoch", metadata.get("period_start_epoch"))
             self.current_cache_manifest.setdefault("period_end_epoch", metadata.get("period_end_epoch"))
 
-    def _emit_boundary_metrics(self) -> None:
+    def _emit_boundary_metrics(self, *, event: str) -> None:
         if self.protocol_name != "checkpoint_base":
             return
         metrics: Dict[str, Any] = {
+            "checkpoint_base/event": str(event),
             "checkpoint_base/period_idx": int(self.current_period_idx),
             "checkpoint_base/period_start_epoch": int(self.current_period_start_epoch),
             "checkpoint_base/period_end_epoch": int(self.current_period_end_epoch),
             "checkpoint_base/q_entropy": float(self._q_entropy().item()),
             "checkpoint_base/refresh_subset_size": int(self.refresh_subset_count or len(self.refresh_subset_indices)),
+            "checkpoint_base/refresh_score_time_sec": float(self.latest_refresh_score_time_sec),
+            "checkpoint_base/cache_generate_time_sec": float(self.latest_cache_generate_time_sec),
         }
         for attack_idx, attack_name in enumerate(self.attack_names):
             metrics[f"checkpoint_base/q/{attack_name}"] = float(self.q[attack_idx].item())
             metrics[f"checkpoint_base/score/{attack_name}"] = float(self.latest_scores.get(attack_name, 0.0))
             metrics[f"checkpoint_base/cache_count/{attack_name}"] = int(self.latest_cache_counts.get(attack_name, 0))
 
-        self.logger.info("checkpoint_base boundary metrics=%s", metrics)
+        self.logger.info(
+            "checkpoint_base event=%s period=%s epochs=%s-%s refresh_subset=%s "
+            "refresh_score_time_sec=%.3f cache_generate_time_sec=%.3f cache_path=%s",
+            event,
+            self.current_period_idx,
+            self.current_period_start_epoch,
+            self.current_period_end_epoch,
+            int(self.refresh_subset_count or len(self.refresh_subset_indices)),
+            self.latest_refresh_score_time_sec,
+            self.latest_cache_generate_time_sec,
+            self.current_cache_manifest.get("path"),
+        )
+        self.logger.info("checkpoint_base q=%s", {name: float(self.q[idx].item()) for idx, name in enumerate(self.attack_names)})
+        self.logger.info("checkpoint_base scores=%s", dict(self.latest_scores))
+        self.logger.info("checkpoint_base cache_counts=%s", dict(self.latest_cache_counts))
         wandb_cfg = self.cfg.get("logging", {}).get("wandb", {})
         if not bool(wandb_cfg.get("enabled", False)):
             return
@@ -471,6 +582,20 @@ class CustomProtocol(Objective):
     def _q_entropy(self) -> torch.Tensor:
         q = self.q.clamp_min(1e-12)
         return -(q * q.log()).sum()
+
+    def _checkpoint_base_warmup_active(self) -> bool:
+        return int(self.current_epoch) <= int(self.warmup_epochs)
+
+    def _sample_online_attack_ids(self, batch_size: int, *, device: torch.device) -> torch.Tensor:
+        probs = self.q.detach().to(dtype=torch.float32).cpu()
+        probs = probs / probs.sum().clamp_min(1e-12)
+        sampled = torch.multinomial(probs, num_samples=int(batch_size), replacement=True)
+        return sampled.to(device=device, dtype=torch.long)
+
+    def consume_train_time_seconds(self) -> float:
+        extra = float(self._pending_train_time_sec)
+        self._pending_train_time_sec = 0.0
+        return extra
 
     def _model_device(self) -> torch.device:
         try:
@@ -488,11 +613,15 @@ class CustomProtocol(Objective):
             "period_idx": int(self.current_period_idx),
             "period_start_epoch": int(self.current_period_start_epoch),
             "period_end_epoch": int(self.current_period_end_epoch),
+            "current_epoch": int(self.current_epoch),
             "refresh_subset_indices": [int(idx) for idx in self.refresh_subset_indices],
             "refresh_subset_count": int(self.refresh_subset_count or len(self.refresh_subset_indices)),
             "current_cache_manifest": dict(self.current_cache_manifest),
             "latest_scores": dict(self.latest_scores),
             "latest_cache_counts": dict(self.latest_cache_counts),
+            "latest_refresh_score_time_sec": float(self.latest_refresh_score_time_sec),
+            "latest_cache_generate_time_sec": float(self.latest_cache_generate_time_sec),
+            "pending_train_time_sec": float(self._pending_train_time_sec),
         }
 
     def load_state_dict(self, state: Dict[str, Any]) -> None:
@@ -521,6 +650,8 @@ class CustomProtocol(Objective):
             self.current_period_start_epoch = int(state["period_start_epoch"])
         if state.get("period_end_epoch") is not None:
             self.current_period_end_epoch = int(state["period_end_epoch"])
+        if state.get("current_epoch") is not None:
+            self.current_epoch = int(state["current_epoch"])
         if isinstance(state.get("refresh_subset_indices"), list):
             self.refresh_subset_indices = [int(idx) for idx in state["refresh_subset_indices"]]
         if state.get("refresh_subset_count") is not None:
@@ -533,4 +664,10 @@ class CustomProtocol(Objective):
             self.latest_scores = {str(k): float(v) for k, v in state["latest_scores"].items()}
         if isinstance(state.get("latest_cache_counts"), dict):
             self.latest_cache_counts = {str(k): int(v) for k, v in state["latest_cache_counts"].items()}
+        if state.get("latest_refresh_score_time_sec") is not None:
+            self.latest_refresh_score_time_sec = float(state["latest_refresh_score_time_sec"])
+        if state.get("latest_cache_generate_time_sec") is not None:
+            self.latest_cache_generate_time_sec = float(state["latest_cache_generate_time_sec"])
+        if state.get("pending_train_time_sec") is not None:
+            self._pending_train_time_sec = float(state["pending_train_time_sec"])
         return None

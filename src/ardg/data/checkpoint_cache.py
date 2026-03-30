@@ -26,7 +26,17 @@ class CheckpointCacheDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:  # type: ignore[override]
         if not self.has_active_cache():
-            raise RuntimeError("Checkpoint cache is not initialized for this dataset.")
+            image, label = self.get_clean_item(int(idx))
+            if not torch.is_tensor(label):
+                label = torch.tensor(int(label), dtype=torch.long)
+            else:
+                label = label.detach().clone().to(dtype=torch.long)
+            return {
+                "x": image,
+                "y": label,
+                "attack_id": torch.tensor(-1, dtype=torch.long),
+                "sample_idx": torch.tensor(int(idx), dtype=torch.long),
+            }
         assert self.cached_images is not None
         assert self.cached_labels is not None
         assert self.cached_attack_ids is not None

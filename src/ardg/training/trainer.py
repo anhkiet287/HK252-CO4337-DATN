@@ -176,7 +176,25 @@ class Trainer:
             start = time.perf_counter()
 
             train_metrics = self.train_one_epoch(epoch) # loss, acc, lr
-            train_metrics["time_sec"] = time.perf_counter() - start # compute time
+            train_compute_time = time.perf_counter() - start
+
+            val_metrics = self.validate(epoch) # prefixed val metrics
+            val_metrics["device"] = str(self.device)
+            val_acc = float(val_metrics.get("val/acc_clean", val_metrics.get("val/acc", 0.0))) # cache val acc for select best model 
+            selection_names = _resolve_selection_names(self.cfg, val_metrics)
+            ckpt_vector = tuple(float(val_metrics.get(n, float("-inf"))) for n in selection_names)
+            ckpt_metric_name = selection_names[0] if selection_names else "acc_clean"
+            ckpt_metric = ckpt_vector[0] if ckpt_vector else val_acc
+
+            try:
+                self.objective.on_epoch_end(epoch, {"train": self.train_loader, "val": self.val_loader})
+            except AttributeError:
+                pass
+
+            consume_train_time = getattr(self.objective, "consume_train_time_seconds", None)
+            extra_train_time = float(consume_train_time()) if callable(consume_train_time) else 0.0
+            train_metrics["time_sec"] = float(train_compute_time + extra_train_time)
+            train_metrics["generation_time_sec"] = float(extra_train_time)
             train_metrics["device"] = str(self.device)
             log_metrics(
                 self.logger,
@@ -186,9 +204,6 @@ class Trainer:
                 epoch=epoch,
                 log_by_epoch=True,
             )
-
-            val_metrics = self.validate(epoch) # prefixed val metrics
-            val_metrics["device"] = str(self.device)
             log_metrics(
                 self.logger,
                 {k.replace("val/", ""): v for k, v in val_metrics.items()},
@@ -215,16 +230,6 @@ class Trainer:
                         log_by_epoch=True,
                     )
                 self._maybe_log_groupdro_q_trajectory(epoch)
-            val_acc = float(val_metrics.get("val/acc_clean", val_metrics.get("val/acc", 0.0))) # cache val acc for select best model 
-            selection_names = _resolve_selection_names(self.cfg, val_metrics)
-            ckpt_vector = tuple(float(val_metrics.get(n, float("-inf"))) for n in selection_names)
-            ckpt_metric_name = selection_names[0] if selection_names else "acc_clean"
-            ckpt_metric = ckpt_vector[0] if ckpt_vector else val_acc
-
-            try:
-                self.objective.on_epoch_end(epoch, {"train": self.train_loader, "val": self.val_loader})
-            except AttributeError:
-                pass
             
             # select best model 
             is_better = self._is_better_checkpoint(ckpt_vector, self.best_vector, self.ckpt_eps)

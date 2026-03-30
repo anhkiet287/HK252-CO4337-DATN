@@ -45,6 +45,7 @@ def _checkpoint_base_cfg() -> dict:
         },
         "custom_protocol": {
             "name": "checkpoint_base",
+            "warmup_epochs": 0,
             "period_epochs": 2,
             "refresh_subset_size": 0.5,
             "score_metric": "ce_loss",
@@ -143,6 +144,7 @@ def test_checkpoint_base_updates_q_only_at_period_boundaries(monkeypatch: pytest
     objective.on_train_start({"train": loader, "val": loader})
 
     assert wrapped.has_active_cache()
+    assert objective.consume_train_time_seconds() >= 0.0
     q_before = objective.q.clone()
     calls_before_loss = dict(call_counts)
 
@@ -160,6 +162,44 @@ def test_checkpoint_base_updates_q_only_at_period_boundaries(monkeypatch: pytest
     objective.on_epoch_end(2, {"train": loader, "val": loader})
     assert objective.current_period_idx == 1
     assert not torch.allclose(objective.q, q_before)
+    assert objective.latest_cache_generate_time_sec >= 0.0
+    assert objective.latest_refresh_score_time_sec >= 0.0
+
+
+def test_checkpoint_base_online_warmup_runs_before_first_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    call_counts = {"clean": 0, "hard": 0}
+    monkeypatch.setattr(
+        custom_protocol_module,
+        "build_train_suite",
+        lambda cfg, model: _fake_checkpoint_suite(call_counts),
+    )
+
+    wrapped = CheckpointCacheDataset(TinyTrainDataset())
+    loader = DataLoader(wrapped, batch_size=2, shuffle=False)
+    cfg = _checkpoint_base_cfg()
+    cfg["custom_protocol"]["warmup_epochs"] = 2
+    objective = CustomProtocol(cfg, TwoClassMeanModel())
+    monkeypatch.setattr(
+        objective,
+        "_sample_online_attack_ids",
+        lambda batch_size, device: torch.ones(batch_size, dtype=torch.long, device=device),
+    )
+
+    objective.on_train_start({"train": loader, "val": loader})
+
+    assert not wrapped.has_active_cache()
+    loss, metrics = objective.compute_loss(objective.model, next(iter(loader)))
+
+    assert torch.isfinite(loss)
+    assert metrics["warmup_online"] == pytest.approx(1.0)
+    assert call_counts["hard"] > 0
+
+    objective.on_epoch_end(1, {"train": loader, "val": loader})
+    assert not wrapped.has_active_cache()
+
+    objective.on_epoch_end(2, {"train": loader, "val": loader})
+    assert wrapped.has_active_cache()
+    assert objective.current_period_idx == 0
 
 
 def test_checkpoint_base_state_roundtrip() -> None:
