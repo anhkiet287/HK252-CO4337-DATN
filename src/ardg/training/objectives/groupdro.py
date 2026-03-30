@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Tuple
 
 import torch
@@ -29,14 +30,23 @@ class GroupDRO(Objective):
 
         dataset_name = str(cfg["dataset"]["name"])
         self.group_names: list[str] = []
+        self.group_metric_names: list[str] = []
         self.attacks: list[Any] = []
+        metric_name_counts: dict[str, int] = {}
         # Paper-native GroupDRO assumes a fixed set of groups known ahead of time.
         # Here each configured train domain becomes one group and owns one attack.
         for group_idx, spec in enumerate(train_domains):
             if not isinstance(spec, dict):
                 raise ValueError(f"attack.train_domains[{group_idx}] must be a mapping.")
             name = str(spec.get("label", spec.get("name", spec.get("type", f"group_{group_idx}")))).strip()
-            self.group_names.append(name or f"group_{group_idx}")
+            resolved_name = name or f"group_{group_idx}"
+            self.group_names.append(resolved_name)
+            metric_name = self._sanitize_group_metric_name(resolved_name)
+            suffix = metric_name_counts.get(metric_name, 0)
+            metric_name_counts[metric_name] = suffix + 1
+            if suffix:
+                metric_name = f"{metric_name}_{suffix}"
+            self.group_metric_names.append(metric_name)
             self.attacks.append(build_attack(dict(spec), model, dataset_name=dataset_name))
 
         self.num_groups = len(self.attacks)
@@ -104,6 +114,8 @@ class GroupDRO(Objective):
             "domain_name": group_name,
             "group_batch_counts": {group_name: batch_size},
         }
+        for idx, metric_name in enumerate(self.group_metric_names):
+            metrics[f"q/{metric_name}"] = float(q[idx].item())
         return weighted_loss, metrics
 
     def state_dict(self) -> Dict[str, Any]:
@@ -165,3 +177,8 @@ class GroupDRO(Objective):
                 return attack(images, labels).detach()
         finally:
             model.train(was_training)
+
+    @staticmethod
+    def _sanitize_group_metric_name(name: str) -> str:
+        sanitized = re.sub(r"[^0-9A-Za-z_]+", "_", str(name).strip()).strip("_").lower()
+        return sanitized or "group"

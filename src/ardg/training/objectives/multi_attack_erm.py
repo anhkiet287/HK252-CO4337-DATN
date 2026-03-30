@@ -367,7 +367,7 @@ class MultiAttackERM(AttackDomainObjective):
                 "Only 'mean' is supported."
             )
 
-        self.include_clean = bool(train_cfg.get("include_clean", True))
+        self.include_clean = bool(train_cfg.get("include_clean", False))
         super().__init__(cfg, model, include_clean=self.include_clean)
 
         seed = int(cfg.get("experiment", {}).get("seed", 42))
@@ -477,6 +477,7 @@ class MultiAttackERM(AttackDomainObjective):
                 break
 
         acc_by_domain: Dict[str, float] = {}
+        adv_acc_by_domain: Dict[str, float] = {}
         for name, totals in domain_totals.items():
             seen = max(float(totals["seen"]), 1.0)
             loss_avg = float(totals["loss"]) / seen
@@ -484,13 +485,15 @@ class MultiAttackERM(AttackDomainObjective):
             metrics[f"loss_{name}"] = loss_avg
             metrics[f"acc_{name}"] = acc_avg
             acc_by_domain[name] = acc_avg
+            if name != "clean":
+                adv_acc_by_domain[name] = acc_avg
 
-        if acc_by_domain:
-            metrics["acc_avg"] = float(sum(acc_by_domain.values()) / len(acc_by_domain))
-            worst_domain = min(acc_by_domain, key=acc_by_domain.get)
-            metrics["acc_worst"] = float(acc_by_domain[worst_domain])
+        if adv_acc_by_domain:
+            metrics["acc_avg"] = float(sum(adv_acc_by_domain.values()) / len(adv_acc_by_domain))
+            worst_domain = min(adv_acc_by_domain, key=adv_acc_by_domain.get)
+            metrics["acc_worst"] = float(adv_acc_by_domain[worst_domain])
             metrics["worst_domain"] = worst_domain
-            if "clean" in acc_by_domain:
-                metrics["acc_clean"] = float(acc_by_domain["clean"])
+        if "clean" in acc_by_domain:
+            metrics["acc_clean"] = float(acc_by_domain["clean"])
 
         return metrics

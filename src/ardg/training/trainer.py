@@ -196,6 +196,23 @@ class Trainer:
                 epoch=epoch,
                 log_by_epoch=True,
             )
+            if self.train_mode in {"groupdro", "group_dro"}:
+                groupdro_val_metrics: Dict[str, Any] = {}
+                if "val/acc_avg" in val_metrics:
+                    groupdro_val_metrics["val_overall_acc"] = float(val_metrics["val/acc_avg"])
+                if "val/acc_worst" in val_metrics:
+                    groupdro_val_metrics["val_worst_group_acc"] = float(val_metrics["val/acc_worst"])
+                if "val/worst_domain" in val_metrics:
+                    groupdro_val_metrics["val_worst_domain"] = str(val_metrics["val/worst_domain"])
+                if groupdro_val_metrics:
+                    log_metrics(
+                        self.logger,
+                        groupdro_val_metrics,
+                        self.global_step,
+                        "groupdro",
+                        epoch=epoch,
+                        log_by_epoch=True,
+                    )
             val_acc = float(val_metrics.get("val/acc_clean", val_metrics.get("val/acc", 0.0))) # cache val acc for select best model 
             selection_names = _resolve_selection_names(self.cfg, val_metrics)
             ckpt_vector = tuple(float(val_metrics.get(n, float("-inf"))) for n in selection_names)
@@ -529,6 +546,10 @@ class Trainer:
                 extra_metric_last,
                 metrics,
             )
+            if self.train_mode in {"groupdro", "group_dro"}:
+                groupdro_step_metrics = _extract_groupdro_step_metrics(metrics)
+                if groupdro_step_metrics:
+                    log_metrics(self.logger, groupdro_step_metrics, self.global_step, "train_step")
 
             if self.log_interval and step_idx % self.log_interval == 0:
                 batch_metrics = {
@@ -690,24 +711,18 @@ def _resolve_selection_names(cfg: Dict[str, Any], metrics: Dict[str, float]) -> 
         groupdro_metric = str(train_cfg.get("groupdro", {}).get("selection_metric", "")).strip()
         if groupdro_metric:
             names = [groupdro_metric]
-            for fallback in ("val/acc_avg", "val/acc_clean"):
+            for fallback in ("val/acc_avg",):
                 if fallback in metrics and fallback not in names:
                     names.append(fallback)
             return names
 
     # default heuristic
     if "val/acc_worst" in metrics and "val/acc_avg" in metrics:
-        names = ["val/acc_worst", "val/acc_avg"]
-        if "val/acc_clean" in metrics:
-            names.append("val/acc_clean")
-        return names
+        return ["val/acc_worst", "val/acc_avg"]
     if "val/acc_clean" in metrics:
         return ["val/acc_clean"]
     if "acc_worst" in metrics and "acc_avg" in metrics:
-        names = ["acc_worst", "acc_avg"]
-        if "acc_clean" in metrics:
-            names.append("acc_clean")
-        return names
+        return ["acc_worst", "acc_avg"]
     if "acc_clean" in metrics:
         return ["acc_clean"]
     if "acc" in metrics:
@@ -849,4 +864,14 @@ def _extract_loggable_step_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
             continue
         if _is_numeric_metric(value) or isinstance(value, str):
             logged[key] = value
+    return logged
+
+
+def _extract_groupdro_step_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    logged: Dict[str, Any] = {}
+    allowed = {"q_g", "q_max", "q_min", "group_id", "loss_group", "domain_name"}
+    for key, value in metrics.items():
+        if key.startswith("q/") or key in allowed:
+            if _is_numeric_metric(value) or isinstance(value, str):
+                logged[key] = value
     return logged

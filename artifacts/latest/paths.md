@@ -35,7 +35,7 @@ This file is the human-readable companion to `artifacts/latest/manifest.yaml`.
 - `run_manifest`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/run_manifest.json`
 - `config_path`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/experiments/cifar10/resnet18/ablations/groupdro_pgd_linf_pgd_l2.yaml`
 - `profile_path`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/profiles/dev_fast.yaml`
-- `wandb_run_id`: `87fs5nec`
+- `wandb_run_id`: `h1yktxp8`
 - `best_checkpoint`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/checkpoints/best.pt`
 - `last_checkpoint`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/checkpoints/last.pt`
 - `train_summary_json`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/train/summary.json`
@@ -46,7 +46,7 @@ This file is the human-readable companion to `artifacts/latest/manifest.yaml`.
 - `run_manifest`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42_eval/run_manifest.json`
 - `config_path`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/experiments/cifar10/resnet18/eval/groupdro_pgd_linf_pgd_l2.yaml`
 - `profile_path`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/profiles/dev_fast.yaml`
-- `wandb_run_id`: `zjg8uyvx`
+- `wandb_run_id`: `phdxkhyl`
 - `checkpoint`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/checkpoints/best.pt`
 - `summary_json`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42_eval/eval/summary.json`
 

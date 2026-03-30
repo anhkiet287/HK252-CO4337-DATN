@@ -6,7 +6,7 @@ train:
     enabled: false
   multi_attack:
     strategy: per_batch
-    include_clean: true
+    include_clean: false
     aggregation: mean
   optimizer:
     name: sgd

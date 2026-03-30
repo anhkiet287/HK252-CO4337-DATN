@@ -86,6 +86,8 @@ def test_groupdro_native_step_updates_only_current_group(monkeypatch: pytest.Mon
     assert metrics["q_g"] == pytest.approx(2.0 / 3.0, rel=1e-6)
     assert metrics["q_max"] == pytest.approx(2.0 / 3.0, rel=1e-6)
     assert metrics["q_min"] == pytest.approx(1.0 / 3.0, rel=1e-6)
+    assert metrics["q/clean"] == pytest.approx(2.0 / 3.0, rel=1e-6)
+    assert metrics["q/shift"] == pytest.approx(1.0 / 3.0, rel=1e-6)
     assert metrics["correct"] == 1
     assert metrics["batch_size"] == 2
 
