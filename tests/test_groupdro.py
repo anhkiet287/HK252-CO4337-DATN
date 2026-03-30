@@ -34,6 +34,18 @@ class MeanLogitModel(torch.nn.Module):
         return torch.stack([pooled, zeros], dim=1)
 
 
+class LargeLossModel(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.bias = torch.nn.Parameter(torch.tensor(0.0))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch = x.size(0)
+        true_class_bad = torch.full((batch,), -1_000_000.0, dtype=torch.float32, device=x.device)
+        other_class = torch.zeros((batch,), dtype=torch.float32, device=x.device)
+        return torch.stack([true_class_bad + self.bias, other_class], dim=1)
+
+
 class TinyDataset(Dataset):
     def __len__(self) -> int:
         return 5
@@ -102,6 +114,26 @@ def test_groupdro_native_step_updates_only_current_group(monkeypatch: pytest.Mon
     assert metrics["q/shift"] == pytest.approx(1.0 / 3.0, rel=1e-6)
     assert metrics["correct"] == 1
     assert metrics["batch_size"] == 2
+
+
+def test_groupdro_online_update_stays_finite_for_large_finite_losses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(groupdro_module, "build_attack", _fake_build_attack)
+
+    objective = GroupDRO(_make_groupdro_cfg(eta_q=0.001), LargeLossModel())
+    batch = {
+        "x": torch.zeros(2, 1, 2, 2),
+        "y": torch.zeros(2, dtype=torch.long),
+        "group_id": torch.zeros(2, dtype=torch.long),
+    }
+
+    loss, metrics = objective.compute_loss(objective.model, batch)
+
+    assert torch.isfinite(loss)
+    assert torch.isfinite(objective.q).all()
+    assert metrics["q_g"] == pytest.approx(1.0, rel=1e-6)
+    assert metrics["q_min"] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_groupdro_batch_mode_updates_observed_groups(monkeypatch: pytest.MonkeyPatch) -> None:

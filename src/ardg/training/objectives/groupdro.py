@@ -69,6 +69,7 @@ class GroupDRO(Objective):
         self.max_plot_points = max(1, int(logging_cfg.get("max_plot_points", 2000)))
         self.q_history: list[list[float]] = []
         self.q_history_steps: list[int] = []
+        self._q_eps = 1e-12
 
     def compute_loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, Any]]:
         images, labels, group_ids = self._extract_group_batch(batch)
@@ -99,14 +100,18 @@ class GroupDRO(Objective):
                 loss_group = torch.nn.functional.cross_entropy(logits, labels)
 
             q = self.q.to(device=labels.device, dtype=torch.float32)
-            # Update q with the detached group loss before weighting theta's loss.
-            # The detach matters: q is an online state variable, not a learnable tensor.
-            q[group_id] = q[group_id] * torch.exp(self.eta_q * loss_group.detach().to(dtype=torch.float32))
-            q_sum = q.sum()
-            if not torch.isfinite(q_sum) or float(q_sum.item()) <= 0.0:
-                raise RuntimeError("GroupDRO q update produced a non-finite or non-positive normalizer.")
-            # Keep q on the simplex after every multiplicative update.
-            q = q / q_sum
+            loss_update = loss_group.detach().to(dtype=torch.float32)
+            if not torch.isfinite(loss_update):
+                raise RuntimeError(
+                    f"GroupDRO received non-finite loss_group for group '{self.group_names[group_id]}'."
+                )
+            # Update q in log-space so the multiplicative rule stays stable even when
+            # a hard attack produces a very large but finite CE loss.
+            log_q = torch.log(q.clamp_min(self._q_eps))
+            log_q[group_id] = log_q[group_id] + (self.eta_q * loss_update)
+            q = torch.softmax(log_q, dim=0)
+            if not torch.isfinite(q).all():
+                raise RuntimeError("GroupDRO q update produced non-finite weights.")
             self.q = q.detach()
 
             # Native GroupDRO uses the updated q[g] for the same step, but the weight is
@@ -144,16 +149,21 @@ class GroupDRO(Objective):
             group_loss_values: list[torch.Tensor] = []
             weighted_loss_terms: list[torch.Tensor] = []
             group_batch_counts: Dict[str, int] = {}
+            log_q = torch.log(q.clamp_min(self._q_eps))
             for group_id in group_list:
                 mask = group_ids == group_id
                 loss_group = per_sample_losses[mask].mean()
-                q[group_id] = q[group_id] * torch.exp(self.eta_q * loss_group.detach().to(dtype=torch.float32))
+                loss_update = loss_group.detach().to(dtype=torch.float32)
+                if not torch.isfinite(loss_update):
+                    raise RuntimeError(
+                        f"GroupDRO received non-finite loss_group for group '{self.group_names[group_id]}'."
+                    )
+                log_q[group_id] = log_q[group_id] + (self.eta_q * loss_update)
                 group_loss_values.append(loss_group)
                 group_batch_counts[self.group_names[group_id]] = int(mask.sum().item())
-            q_sum = q.sum()
-            if not torch.isfinite(q_sum) or float(q_sum.item()) <= 0.0:
-                raise RuntimeError("GroupDRO q update produced a non-finite or non-positive normalizer.")
-            q = q / q_sum
+            q = torch.softmax(log_q, dim=0)
+            if not torch.isfinite(q).all():
+                raise RuntimeError("GroupDRO q update produced non-finite weights.")
             self.q = q.detach()
 
             for group_id, loss_group in zip(group_list, group_loss_values):

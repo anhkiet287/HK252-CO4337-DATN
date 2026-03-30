@@ -5,12 +5,12 @@ experiment:
   device: cuda
   precision: fp16
 dataset:
-  data_dir: /content/drive/MyDrive/HK252-CO4337-DATN/data
+  data_dir: /content/drive/MyDrive/exp/HK252-CO4337-DATN/data
   num_workers: 2
 eval:
   batch_size: 128
 logging:
-  output_dir: /content/drive/MyDrive/HK252-CO4337-DATN/outputs
+  output_dir: /content/drive/MyDrive/exp/HK252-CO4337-DATN/outputs
   wandb:
     enabled: true
     mode: online
