@@ -9,8 +9,10 @@ from ardg.attacks.cw import build_cw_attack
 from ardg.attacks.deepfool import build_deepfool_attack
 from ardg.attacks.fab import build_fab_attack
 from ardg.attacks.fgsm import build_fgsm_attack
+from ardg.attacks.mifgsm import build_mifgsm_attack
 from ardg.attacks.pgd import build_pgd_attack
 from ardg.attacks.square import build_square_attack
+from ardg.attacks.tpgd import build_tpgd_attack
 
 if TYPE_CHECKING:
     from torch import nn
@@ -31,6 +33,10 @@ def _build_attack_from_cfg(atk_cfg: Dict[str, Any], model: "nn.Module") -> Any:
     name = str(atk_cfg.get("name", "pgd")).lower()
     if name in {"pgd", "pgd_linf"}:
         return build_pgd_attack(atk_cfg, model)
+    if name == "tpgd":
+        return build_tpgd_attack(atk_cfg, model)
+    if name in {"mifgsm", "mi_fgsm", "mi-fgsm"}:
+        return build_mifgsm_attack(atk_cfg, model)
     if name == "fgsm":
         return build_fgsm_attack(atk_cfg, model)
     if name in {"cw", "carlini-wagner", "carlini_wagner"}:
@@ -74,6 +80,8 @@ def build_attack(
         "pgd_linf",
         "pgd_ce",
         "pgd_dlr",
+        "tpgd",
+        "mifgsm",
         "fgsm",
         "fgsm_rs",
         "fab",

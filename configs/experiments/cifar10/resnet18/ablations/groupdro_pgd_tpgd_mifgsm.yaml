@@ -1,0 +1,15 @@
+_base_:
+  - ../../../../fragments/experiment/common.yaml
+  - ../../../../fragments/datasets/cifar10.yaml
+  - ../../../../fragments/models/resnet18.yaml
+  - ../../../../fragments/methods/groupdro.yaml
+  - ../../../../fragments/attacks/pgd_tpgd_mifgsm.yaml
+  - ../../../../fragments/attacks/heldout_pgd_tpgd_mifgsm.yaml
+  - ../../../../fragments/logging/wandb_required.yaml
+
+experiment:
+  name: ablation_groupdro_pgd_tpgd_mifgsm
+dataset:
+  augmentation: standard
+train:
+  batch_size: 256

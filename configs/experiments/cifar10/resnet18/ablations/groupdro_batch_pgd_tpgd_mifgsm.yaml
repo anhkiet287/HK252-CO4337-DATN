@@ -1,0 +1,9 @@
+_base_:
+  - ./groupdro_pgd_tpgd_mifgsm.yaml
+
+experiment:
+  name: ablation_groupdro_batch_pgd_tpgd_mifgsm
+
+train:
+  groupdro:
+    update_mode: batch

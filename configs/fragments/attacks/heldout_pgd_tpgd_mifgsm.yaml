@@ -1,0 +1,48 @@
+attack:
+  val_suite:
+    attacks:
+      - label: pgd_linf
+        type: pgd
+        norm: Linf
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 10
+        loss: ce
+        random_start: true
+      - label: tpgd
+        type: tpgd
+        norm: Linf
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 10
+      - label: mifgsm
+        type: mifgsm
+        norm: Linf
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 10
+        decay: 1.0
+  eval_suite:
+    max_batches: 0
+    attacks:
+      - label: pgd_linf
+        type: pgd
+        norm: Linf
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 10
+        loss: ce
+        random_start: true
+      - label: tpgd
+        type: tpgd
+        norm: Linf
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 10
+      - label: mifgsm
+        type: mifgsm
+        norm: Linf
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 10
+        decay: 1.0
