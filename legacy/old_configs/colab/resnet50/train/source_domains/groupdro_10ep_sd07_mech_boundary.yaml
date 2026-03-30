@@ -1,0 +1,139 @@
+experiment:
+  seed: 42
+  device: cuda
+  precision: fp32
+  deterministic: true
+dataset:
+  name: cifar10
+  data_dir: /content/ardg/data
+  val_ratio: 0.02
+  num_workers: 8
+  augmentation: standard
+model:
+  name: resnet50_cifar
+  num_classes: 10
+train:
+  mode: groupdro
+  domain_strategy: all_domains
+  epochs: 10
+  batch_size: 64
+  log_interval: 50
+  selection:
+    vector:
+    - val/acc_worst
+    - val/acc_avg
+    - val/acc_clean
+    eps: 1.0e-06
+  early_stopping:
+    enabled: false
+    metric: val/acc_worst
+    mode: max
+  optimizer:
+    name: sgd
+    lr: 0.1
+    momentum: 0.9
+    weight_decay: 0.0005
+  scheduler:
+    name: cosine
+    t_max: 10
+    eta_min: 0.0
+  groupdro:
+    eta_q: 0.02
+    include_clean: true
+    init_q: uniform
+    worst_group_by: loss
+    selection_metric: val/acc_worst
+attack:
+  eval_suite:
+    max_batches: 0
+    attacks:
+    - label: clean
+      type: clean
+    - label: fgsm_rs_linf
+      type: fgsm
+      norm: Linf
+      eps: 0.0313725
+      alpha: 0.0313725
+      random_start: true
+    - label: pgd20_ce_linf
+      type: pgd
+      norm: Linf
+      eps: 0.0313725
+      step_size: 0.007843
+      num_steps: 20
+      restarts: 5
+      loss: ce
+      random_start: true
+    - label: pgd20_ce_l2
+      type: pgd
+      norm: L2
+      eps: 1.0
+      step_size: 0.2
+      num_steps: 20
+      restarts: 1
+      loss: ce
+      random_start: true
+    - label: cw_l2
+      type: cw
+      norm: L2
+      c: 1.0
+      kappa: 0.0
+      num_steps: 50
+      lr: 0.01
+    - label: deepfool_l2
+      type: deepfool
+      norm: L2
+      num_steps: 50
+      overshoot: 0.02
+  train_domains:
+  - label: pgd_ce_linf
+    type: pgd
+    norm: Linf
+    eps: 0.0313725
+    step_size: 0.007843
+    num_steps: 10
+    restarts: 1
+    loss: ce
+    random_start: true
+  - label: deepfool_l2
+    type: deepfool
+    norm: L2
+    num_steps: 50
+    overshoot: 0.02
+  val_suite:
+    attacks:
+    - label: clean
+      type: clean
+    - label: pgd_ce_linf
+      type: pgd
+      norm: Linf
+      eps: 0.0313725
+      step_size: 0.007843
+      num_steps: 10
+      restarts: 1
+      loss: ce
+      random_start: true
+    - label: deepfool_l2
+      type: deepfool
+      norm: L2
+      num_steps: 50
+      overshoot: 0.02
+val:
+  probe:
+    enabled: true
+    type: pgd
+    norm: Linf
+    eps: 0.0313725
+    steps: 20
+    alpha: 0.007843
+    restarts: 1
+    max_batches: 10
+logging:
+  wandb:
+    enabled: true
+    project: ardg
+    entity: ''
+    group_template: '{model}/{stage}'
+    add_default_tags: true
+  run_name: resnet50_colab_groupdro_10ep_sd07_mech_boundary
+  output_dir: /content/HK252-CO4337-DATN/outputs

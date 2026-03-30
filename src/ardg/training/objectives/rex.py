@@ -27,9 +27,11 @@ class REx(Objective):
         if self.attack is None:
             return batch
         images, labels = unpack_xy(batch)
+        was_training = bool(model.training)
         model.eval()
-        adv = self.attack(images, labels)
-        model.train()
+        with self.full_precision_context():
+            adv = self.attack(images, labels)
+        model.train(was_training)
         adv = adv.detach()
         if isinstance(batch, dict):
             newb = dict(batch)
@@ -39,8 +41,9 @@ class REx(Objective):
 
     def compute_loss(self, model: Any, batch: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
         images, labels = unpack_xy(batch)
-        logits = model(images)
-        base_loss = compute_loss(logits, labels)
+        with self.autocast_context():
+            logits = model(images)
+            base_loss = compute_loss(logits, labels)
 
         # Randomly partition batch into num_splits pseudo-environments.
         perm = torch.randperm(labels.size(0), device=labels.device)

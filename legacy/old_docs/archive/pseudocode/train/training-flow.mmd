@@ -1,0 +1,38 @@
+flowchart TD
+    A["scripts/train.py<br/>parse CLI args"] --> B["Resolve resume checkpoint<br/>and W&B run id"]
+    B --> C["setup_run<br/>load config, platform override,<br/>seed, device, logger, wandb"]
+    C --> D["build_loaders(train, val)"]
+    C --> E["build_model"]
+    D --> F["Trainer.__init__<br/>optimizer, scheduler, objective,<br/>val suite, evaluator"]
+    E --> F
+    B --> G{"resume checkpoint?"}
+    G -- yes --> H["trainer.load_checkpoint(...)"]
+    G -- no --> I["epoch loop"]
+    H --> I
+
+    I --> J["train_one_epoch"]
+    J --> K["_train_step<br/>move_to_device -> preprocess_batch<br/>-> compute_loss -> backward -> step"]
+    J --> L["aggregate epoch train metrics"]
+    I --> M["validate<br/>Evaluator + summarize_suite<br/>+ objective.validate hook"]
+    M --> N["resolve selection vector"]
+    N --> O{"better than best?"}
+    O -- yes --> P["save best.pt"]
+    O -- no --> Q["skip"]
+    P --> R["save last.pt"]
+    Q --> R
+    R --> S["maybe save best_worst.pt<br/>and best_avg.pt"]
+    S --> T["update early stopping"]
+    T --> U["scheduler.step()"]
+    U --> V{"stop?"}
+    V -- no --> I
+    V -- yes --> W["return best/last checkpoint paths"]
+
+    classDef cli fill:#e8f0fe,stroke:#4c6ef5,stroke-width:1px,color:#111;
+    classDef setup fill:#eafaf1,stroke:#2f9e44,stroke-width:1px,color:#111;
+    classDef loop fill:#fff4e6,stroke:#f08c00,stroke-width:1px,color:#111;
+    classDef out fill:#fff0f6,stroke:#d6336c,stroke-width:1px,color:#111;
+
+    class A,B cli;
+    class C,D,E,F,G,H setup;
+    class I,J,K,L,M,N,O,R,S,T,U,V loop;
+    class P,Q,W out;

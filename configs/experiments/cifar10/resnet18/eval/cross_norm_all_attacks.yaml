@@ -1,0 +1,16 @@
+_base_:
+  - ../../../../fragments/experiment/common.yaml
+  - ../../../../fragments/datasets/cifar10.yaml
+  - ../../../../fragments/models/resnet18.yaml
+  - ../../../../fragments/methods/multi_attack_erm.yaml
+  - ../../../../fragments/attacks/heldout_all_attacks.yaml
+  - ../../../../fragments/logging/wandb_required.yaml
+
+experiment:
+  name: baseline_cross_norm
+dataset:
+  augmentation: standard
+train:
+  batch_size: 256
+eval:
+  batch_size: 128

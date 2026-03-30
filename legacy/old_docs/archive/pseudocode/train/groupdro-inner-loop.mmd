@@ -1,0 +1,25 @@
+flowchart LR
+    A["DataLoader batch<br/>CIFAR 10 batch of images and labels"] --> B["Move batch to device"]
+    B --> C["GroupDRO preprocess batch"]
+    C --> D["Build all domains batch"]
+    D --> E["Create domain views<br/>clean fgsm rs pgd ce pgd dlr"]
+    E --> F["Forward pass on each domain"]
+    F --> G["Compute per domain loss and accuracy"]
+    G --> H["Update q with detached domain losses<br/>then normalize"]
+    H --> I["Compute weighted total loss"]
+    I --> J["Backward on total loss"]
+    J --> K["Optimizer step"]
+
+    L["Toy example<br/>batch size 2<br/>domain losses 0.20 0.80 1.10 1.50<br/>initial q uniform<br/>updated q shifts toward hardest domain"] --> H
+
+    M["Output metrics<br/>per domain loss and accuracy<br/>per domain q<br/>q entropy average group loss worst group by loss"] --> K
+
+    classDef data fill:#e8f0fe,stroke:#4c6ef5,stroke-width:1px,color:#111;
+    classDef domain fill:#fff4e6,stroke:#f08c00,stroke-width:1px,color:#111;
+    classDef dro fill:#fff0f6,stroke:#d6336c,stroke-width:1px,color:#111;
+    classDef out fill:#eafaf1,stroke:#2f9e44,stroke-width:1px,color:#111;
+
+    class A,B data;
+    class C,D,E,F,G domain;
+    class H,I,J,K,L dro;
+    class M out;

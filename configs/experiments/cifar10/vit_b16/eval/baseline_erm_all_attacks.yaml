@@ -1,0 +1,16 @@
+_base_:
+  - ../../../../fragments/experiment/common.yaml
+  - ../../../../fragments/datasets/cifar10.yaml
+  - ../../../../fragments/models/vit_b16.yaml
+  - ../../../../fragments/methods/erm.yaml
+  - ../../../../fragments/attacks/cifar10_eval_all_attacks.yaml
+  - ../../../../fragments/logging/wandb_required.yaml
+
+experiment:
+  name: baseline_erm
+dataset:
+  augmentation: standard
+train:
+  batch_size: 64
+eval:
+  batch_size: 64

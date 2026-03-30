@@ -1,0 +1,4 @@
+model:
+  name: vit_b16_cifar
+  num_classes: 10
+  pretrained: false

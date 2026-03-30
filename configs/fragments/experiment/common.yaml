@@ -1,0 +1,5 @@
+experiment:
+  seed: 42
+  deterministic: true
+  device: cuda
+  precision: fp32

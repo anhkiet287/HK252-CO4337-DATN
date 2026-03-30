@@ -10,18 +10,36 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from ardg.attacks.pgd import build_pgd_attack
-from ardg.config import DEFAULT_CONFIG_PATH, load_config
+from ardg.config import DEFAULT_CONFIG_PATH
 from ardg.data.datasets import load_dataset
 from ardg.data.transforms import build_transforms, get_dataset_stats
+from ardg.experiments.common import load_runtime_config, setup_run
 from ardg.models.factory import build_model
 from ardg.utils.data import normalize_dataset_name
+from ardg.utils.precision import PrecisionController
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run fast preflight checks.")
     parser.add_argument("--config", default=DEFAULT_CONFIG_PATH, help="Path to YAML config.")
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="Optional runtime profile overlay YAML (e.g. configs/profiles/local_gpu.yaml).",
+    )
     parser.add_argument("--io_mode", choices=["pixel", "normalized"], required=True, help="Input mode to verify.")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for one-batch preflight.")
+    parser.add_argument(
+        "--platform",
+        choices=("local", "colab"),
+        default=None,
+        help="Legacy platform override. Prefer --profile for thesis workflows.",
+    )
+    parser.add_argument(
+        "--check-wandb",
+        action="store_true",
+        help="Also perform W&B initialization as a preflight stage.",
+    )
     return parser.parse_args()
 
 
@@ -76,9 +94,27 @@ def _linf_max(delta: torch.Tensor) -> float:
 
 def main() -> None:
     args = parse_args()
-    cfg = load_config(args.config)
+    cfg = load_runtime_config(
+        args.config,
+        profile_path=args.profile,
+        platform_override=args.platform,
+    )
     cfg_device = str(cfg.get("experiment", {}).get("device", "cpu"))
     device = torch.device(cfg_device if (cfg_device.startswith("cuda") and torch.cuda.is_available()) else "cpu")
+    precision = PrecisionController.from_config(cfg, device=str(device))
+    print(f"[INFO] precision={precision.describe()}")
+
+    if args.check_wandb:
+        _, _, run, _ = setup_run(
+            args.config,
+            stage="preflight",
+            run_name_suffix="preflight",
+            profile_path=args.profile,
+            require_wandb=True,
+            platform_override=args.platform,
+        )
+        if run is not None:
+            run.finish()
 
     images, labels = _get_batch(cfg, args.io_mode, args.batch_size)
     images = images.to(device)
@@ -136,7 +172,8 @@ def main() -> None:
     model = build_model(cfg).to(device)
     model.eval()
     with torch.no_grad():
-        logits = model(x_norm)
+        with precision.autocast_context():
+            logits = model(x_norm)
     forward_ok = logits.ndim == 2 and logits.size(0) == x_norm.size(0)
     print(f"[INFO] forward_check={'PASS' if forward_ok else 'FAIL'} logits_shape={tuple(logits.shape)}")
     if not forward_ok:

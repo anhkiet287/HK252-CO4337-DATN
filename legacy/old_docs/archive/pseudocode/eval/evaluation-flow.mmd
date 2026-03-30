@@ -1,0 +1,30 @@
+flowchart TD
+    A["scripts/evaluate.py<br/>parse CLI args"] --> B["setup_run<br/>run_name + '_eval'"]
+    B --> C["Resolve eval seed<br/>and deterministic mode"]
+    C --> D["Apply CLI overrides<br/>workers test samples smoke mode"]
+    D --> E["Resolve checkpoint<br/>explicit or best/last fallback"]
+    E --> F["Load model from checkpoint"]
+    D --> G["Build test loader"]
+    D --> H["Resolve max_batches"]
+    F --> I["Build eval attack suite"]
+    F --> J["Create evaluator"]
+    G --> J
+    H --> J
+    J --> K["Evaluate clean"]
+    I --> L["Evaluate each attack<br/>capture runtime and failures"]
+    K --> M["summarize_suite(clean + robust)"]
+    L --> M
+    M --> N["Log test metrics<br/>and W&B attack charts"]
+    N --> O["Log system metrics"]
+    O --> P["Save evaluation json"]
+    P --> Q["Finish eval run"]
+
+    classDef cli fill:#e8f0fe,stroke:#4c6ef5,stroke-width:1px,color:#111;
+    classDef runtime fill:#eafaf1,stroke:#2f9e44,stroke-width:1px,color:#111;
+    classDef eval fill:#fff4e6,stroke:#f08c00,stroke-width:1px,color:#111;
+    classDef out fill:#f3f0ff,stroke:#7048e8,stroke-width:1px,color:#111;
+
+    class A cli;
+    class B,C,D,E,F,G,H runtime;
+    class I,J,K,L,M eval;
+    class N,O,P,Q out;

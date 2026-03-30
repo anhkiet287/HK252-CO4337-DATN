@@ -1,0 +1,3 @@
+model:
+  name: resnet18_cifar
+  num_classes: 10

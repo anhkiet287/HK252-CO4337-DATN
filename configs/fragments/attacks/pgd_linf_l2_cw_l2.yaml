@@ -1,0 +1,24 @@
+attack:
+  train_domains:
+    - name: pgd_linf
+      type: pgd
+      norm: Linf
+      eps: 0.0313725
+      step_size: 0.007843
+      num_steps: 10
+      loss: ce
+      random_start: true
+    - name: pgd_l2
+      type: pgd
+      norm: L2
+      eps: 0.5
+      step_size: 0.125
+      num_steps: 10
+      loss: ce
+      random_start: true
+    - name: cw_l2
+      type: cw
+      c: 1.0
+      kappa: 0.0
+      num_steps: 20
+      lr: 0.01

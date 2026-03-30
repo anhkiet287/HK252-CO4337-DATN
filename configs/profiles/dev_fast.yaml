@@ -1,0 +1,25 @@
+runtime:
+  profile: dev_fast
+experiment:
+  platform: local
+  device: cuda
+  precision: fp32
+dataset:
+  data_dir: data
+  num_workers: 0
+  max_train_samples: 256
+  max_val_samples: 128
+  max_test_samples: 128
+train:
+  epochs: 2
+  batch_size: 32
+  max_batches: 2
+  max_val_batches: 1
+  log_interval: 1
+eval:
+  batch_size: 32
+logging:
+  output_dir: outputs/dev_fast
+  wandb:
+    enabled: true
+    mode: offline
