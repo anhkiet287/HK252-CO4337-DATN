@@ -1,0 +1,88 @@
+attack:
+  val_suite:
+    attacks:
+      - label: pgd_linf
+        type: pgd
+        norm: Linf
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 10
+        loss: ce
+        random_start: true
+      - label: pgd_l2
+        type: pgd
+        norm: L2
+        eps: 0.5
+        step_size: 0.125
+        num_steps: 10
+        loss: ce
+        random_start: true
+      - label: cw_l2
+        type: cw
+        c: 1.0
+        kappa: 0.0
+        num_steps: 20
+        lr: 0.01
+      - label: tpgd
+        type: tpgd
+        norm: Linf
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 10
+      - label: mifgsm
+        type: mifgsm
+        norm: Linf
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 10
+        decay: 1.0
+      - label: fab_l2
+        type: fab
+        norm: L2
+        eps: 0.5
+        num_steps: 30
+        restarts: 1
+  eval_suite:
+    max_batches: 0
+    attacks:
+      - label: pgd_linf
+        type: pgd
+        norm: Linf
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 10
+        loss: ce
+        random_start: true
+      - label: pgd_l2
+        type: pgd
+        norm: L2
+        eps: 0.5
+        step_size: 0.125
+        num_steps: 10
+        loss: ce
+        random_start: true
+      - label: cw_l2
+        type: cw
+        c: 1.0
+        kappa: 0.0
+        num_steps: 20
+        lr: 0.01
+      - label: tpgd
+        type: tpgd
+        norm: Linf
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 10
+      - label: mifgsm
+        type: mifgsm
+        norm: Linf
+        eps: 0.0313725
+        step_size: 0.007843
+        num_steps: 10
+        decay: 1.0
+      - label: fab_l2
+        type: fab
+        norm: L2
+        eps: 0.5
+        num_steps: 30
+        restarts: 1

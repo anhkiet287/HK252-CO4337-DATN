@@ -1,10 +1,9 @@
 train:
   mode: custom_protocol
-  adv_training: false
   epochs: 100
   log_interval: 50
   selection:
-    vector: val/acc_clean
+    vector: ["val/acc_worst", "val/acc_avg", "val/acc_clean"]
   optimizer:
     name: sgd
     lr: 0.1
@@ -14,9 +13,19 @@ train:
     name: cosine
     t_max: 100
     eta_min: 0.0
-  custom_protocol:
-    # TODO: set to true if your method should train on attacked inputs.
-    use_adv_inputs: false
-    # TODO: replace these placeholder weights with your real objective hyperparameters.
-    weight_main: 1.0
-    weight_aux: 0.0
+
+custom_protocol:
+  name: checkpoint_base
+  period_epochs: 2
+  refresh_subset_size: 0.05
+  score_metric: ce_loss
+  update_rule:
+    temperature: 1.0
+    alpha: 0.5
+    beta: 0.1
+  allocation:
+    mode: quota
+    one_attack_per_sample: true
+  cache:
+    save_to_disk: true
+    directory: artifacts/checkpoint_base_cache

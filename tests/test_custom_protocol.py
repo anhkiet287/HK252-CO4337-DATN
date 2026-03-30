@@ -3,8 +3,11 @@ from __future__ import annotations
 import pytest
 
 torch = pytest.importorskip("torch")
+from torch.utils.data import DataLoader, Dataset
 
+from ardg.data.checkpoint_cache import CheckpointCacheDataset
 from ardg.training.objectives import build_objective
+import ardg.training.objectives.custom_protocol as custom_protocol_module
 from ardg.training.objectives.custom_protocol import CustomProtocol
 
 
@@ -32,11 +35,57 @@ def _cfg() -> dict:
     }
 
 
+def _checkpoint_base_cfg() -> dict:
+    return {
+        "dataset": {"name": "cifar10"},
+        "experiment": {"seed": 7},
+        "train": {
+            "mode": "custom_protocol",
+            "batch_size": 2,
+        },
+        "custom_protocol": {
+            "name": "checkpoint_base",
+            "period_epochs": 2,
+            "refresh_subset_size": 0.5,
+            "score_metric": "ce_loss",
+            "update_rule": {"temperature": 1.0, "alpha": 0.5, "beta": 0.1},
+            "allocation": {"mode": "quota", "one_attack_per_sample": True},
+            "cache": {"save_to_disk": False, "directory": "artifacts/checkpoint_base_cache"},
+        },
+        "attack": {
+            "train_domains": [
+                {"label": "clean", "type": "clean"},
+                {"label": "hard", "type": "pgd", "eps": 8.0 / 255.0, "step_size": 2.0 / 255.0, "num_steps": 2},
+            ]
+        },
+    }
+
+
 def _batch() -> dict:
     return {
         "x": torch.randn(6, 1, 2, 2),
         "y": torch.tensor([0, 1, 2, 1, 0, 2], dtype=torch.long),
     }
+
+
+class TinyTrainDataset(Dataset):
+    def __len__(self) -> int:
+        return 6
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
+        del idx
+        return torch.zeros(1, 2, 2), 0
+
+
+class TwoClassMeanModel(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.bias = torch.nn.Parameter(torch.tensor(0.0))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        pooled = x.view(x.size(0), -1).mean(dim=1) + self.bias
+        zeros = torch.zeros_like(pooled)
+        return torch.stack([pooled, zeros], dim=1)
 
 
 def test_registry_builds_custom_protocol() -> None:
@@ -64,3 +113,74 @@ def test_custom_protocol_state_roundtrip() -> None:
     restored.load_state_dict(objective.state_dict())
 
     assert restored.protocol_step == 7
+
+
+def _fake_checkpoint_suite(call_counts: dict[str, int]):
+    def clean(images: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        del labels
+        call_counts["clean"] += 1
+        return images
+
+    def hard(images: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        del labels
+        call_counts["hard"] += 1
+        return images - 1.0
+
+    return {"clean": clean, "hard": hard}
+
+
+def test_checkpoint_base_updates_q_only_at_period_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
+    call_counts = {"clean": 0, "hard": 0}
+    monkeypatch.setattr(
+        custom_protocol_module,
+        "build_train_suite",
+        lambda cfg, model: _fake_checkpoint_suite(call_counts),
+    )
+
+    wrapped = CheckpointCacheDataset(TinyTrainDataset())
+    loader = DataLoader(wrapped, batch_size=2, shuffle=False)
+    objective = CustomProtocol(_checkpoint_base_cfg(), TwoClassMeanModel())
+    objective.on_train_start({"train": loader, "val": loader})
+
+    assert wrapped.has_active_cache()
+    q_before = objective.q.clone()
+    calls_before_loss = dict(call_counts)
+
+    loss, metrics = objective.compute_loss(objective.model, next(iter(loader)))
+
+    assert torch.isfinite(loss)
+    assert dict(call_counts) == calls_before_loss
+    assert torch.allclose(objective.q, q_before)
+    assert "loss_adv" in metrics
+    assert "acc_adv" in metrics
+
+    objective.on_epoch_end(1, {"train": loader, "val": loader})
+    assert torch.allclose(objective.q, q_before)
+
+    objective.on_epoch_end(2, {"train": loader, "val": loader})
+    assert objective.current_period_idx == 1
+    assert not torch.allclose(objective.q, q_before)
+
+
+def test_checkpoint_base_state_roundtrip() -> None:
+    objective = CustomProtocol(_checkpoint_base_cfg(), TwoClassMeanModel())
+    objective.q = torch.tensor([0.8, 0.2], dtype=torch.float32)
+    objective.current_period_idx = 3
+    objective.current_period_start_epoch = 7
+    objective.current_period_end_epoch = 8
+    objective.refresh_subset_indices = [1, 4, 5]
+    objective.refresh_subset_count = 3
+    objective.current_cache_manifest = {"path": "/tmp/cache.pt", "period_idx": 3}
+    objective.latest_scores = {"clean": 0.5, "hard": 1.5}
+    objective.latest_cache_counts = {"clean": 2, "hard": 4}
+
+    restored = CustomProtocol(_checkpoint_base_cfg(), TwoClassMeanModel())
+    restored.load_state_dict(objective.state_dict())
+
+    assert torch.allclose(restored.q, objective.q)
+    assert restored.current_period_idx == 3
+    assert restored.current_period_start_epoch == 7
+    assert restored.current_period_end_epoch == 8
+    assert restored.refresh_subset_indices == [1, 4, 5]
+    assert restored.current_cache_manifest["path"] == "/tmp/cache.pt"
+    assert restored.latest_scores["hard"] == pytest.approx(1.5)

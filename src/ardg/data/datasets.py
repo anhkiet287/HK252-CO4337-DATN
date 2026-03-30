@@ -7,6 +7,7 @@ from torch.utils.data import Dataset
 from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 
+from ardg.data.checkpoint_cache import CheckpointCacheDataset
 from ardg.data.grouping import GroupHomogeneousBatchSampler, RepeatedGroupDataset
 from ardg.utils.data import normalize_dataset_name
 from ardg.data.splits import ensure_split, load_splits
@@ -120,6 +121,9 @@ def get_dataloaders(cfg: dict) -> Tuple[Any, Any, Any]:
         test_indices = list(range(min(int(max_test), len(test_ds))))
         test_ds = Subset(test_ds, test_indices)
 
+    if _use_checkpoint_base_cache_dataset(cfg):
+        train_subset = CheckpointCacheDataset(train_subset)
+
     pin = torch.cuda.is_available()
 
     if _use_groupdro_loader(cfg) and _has_groupdro_train_domains(cfg):
@@ -198,3 +202,23 @@ def _resolve_groupdro_update_mode(cfg: dict) -> str:
             f"Unsupported train.groupdro.update_mode={update_mode!r}. Use 'online' or 'batch'."
         )
     return update_mode
+
+
+def _resolve_custom_protocol_cfg(cfg: dict) -> dict:
+    nested = cfg.get("train", {}).get("custom_protocol", {})
+    top_level = cfg.get("custom_protocol", {})
+    merged: dict = {}
+    if isinstance(nested, dict):
+        merged.update(nested)
+    if isinstance(top_level, dict):
+        merged.update(top_level)
+    return merged
+
+
+def _use_checkpoint_base_cache_dataset(cfg: dict) -> bool:
+    mode = str(cfg.get("train", {}).get("mode", "")).lower()
+    if mode not in {"custom_protocol", "custom-protocol"}:
+        return False
+    proto_cfg = _resolve_custom_protocol_cfg(cfg)
+    name = str(proto_cfg.get("name", "")).strip().lower()
+    return name == "checkpoint_base"
