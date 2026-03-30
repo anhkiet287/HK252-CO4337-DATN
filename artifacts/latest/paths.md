@@ -29,27 +29,26 @@ This file is the human-readable companion to `artifacts/latest/manifest.yaml`.
 
 ## Latest resnet18
 ### train
-- `run_name`: `resnet18_dev_baseline_uniform_multi_attack_mixed_seed42_smoke`
-- `run_dir`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_baseline_uniform_multi_attack_mixed_seed42_smoke`
-- `resolved_config`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_baseline_uniform_multi_attack_mixed_seed42_smoke/resolved_config.yaml`
-- `run_manifest`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/thesis/local/resnet18_local_baseline_uniform_multi_attack_mixed_seed42/run_manifest.json`
-- `config_path`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/experiments/cifar10/resnet18/baselines/uniform_multi_attack_mixed.yaml`
-- `profile_path`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/profiles/local_gpu.yaml`
-- `wandb_run_id`: `lp1agaju`
-- `best_checkpoint`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_baseline_uniform_multi_attack_mixed_seed42_smoke/checkpoints/best.pt`
-- `last_checkpoint`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_baseline_uniform_multi_attack_mixed_seed42_smoke/checkpoints/last.pt`
-- `train_summary_json`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_baseline_uniform_multi_attack_mixed_seed42_smoke/train/summary.json`
+- `run_name`: `resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42`
+- `run_dir`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42`
+- `resolved_config`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/resolved_config.yaml`
+- `run_manifest`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/run_manifest.json`
+- `config_path`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/experiments/cifar10/resnet18/ablations/groupdro_pgd_linf_pgd_l2.yaml`
+- `profile_path`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/profiles/dev_fast.yaml`
+- `wandb_run_id`: `87fs5nec`
+- `best_checkpoint`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/checkpoints/best.pt`
+- `last_checkpoint`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/checkpoints/last.pt`
+- `train_summary_json`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/train/summary.json`
 ### eval
-- `run_name`: `resnet18_local_baseline_erm_seed42_eval`
-- `run_dir`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/thesis/local/resnet18_local_baseline_erm_seed42_eval`
-- `resolved_config`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/thesis/local/resnet18_local_baseline_erm_seed42_eval/resolved_config.yaml`
-- `run_manifest`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/thesis/local/resnet18_local_baseline_erm_seed42_eval/run_manifest.json`
-- `config_path`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/experiments/cifar10/resnet18/eval/baseline_erm_all_attacks.yaml`
-- `profile_path`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/profiles/local_gpu.yaml`
-- `wandb_run_id`: `xkorfeps`
-- `wandb_url`: `https://wandb.ai/kietna-ho-chi-minh-city-university-of-technology/ardg/runs/xkorfeps`
-- `checkpoint`: `outputs/thesis/local/resnet18_local_baseline_pgd_at_linf_seed42/checkpoints/best.pt`
-- `summary_json`: `outputs/thesis/local/resnet18_local_baseline_pgd_at_linf_seed42/eval/all_attacks_summary.json`
+- `run_name`: `resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42_eval`
+- `run_dir`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42_eval`
+- `resolved_config`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42_eval/resolved_config.yaml`
+- `run_manifest`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42_eval/run_manifest.json`
+- `config_path`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/experiments/cifar10/resnet18/eval/groupdro_pgd_linf_pgd_l2.yaml`
+- `profile_path`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/profiles/dev_fast.yaml`
+- `wandb_run_id`: `zjg8uyvx`
+- `checkpoint`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/checkpoints/best.pt`
+- `summary_json`: `/mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42_eval/eval/summary.json`
 
 ## Latest resnet50
 ### train

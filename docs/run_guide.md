@@ -24,10 +24,10 @@ Runtime precision is controlled by `experiment.precision`:
 - `bf16`: CUDA autocast without GradScaler
 - CPU fallback logs a forced `fp32` downgrade
 
-Proposed method:
+GroupDRO study:
 
 ```bash
-python scripts/train.py --config configs/experiments/cifar10/resnet18/proposed/groupdro_plus.yaml --profile configs/profiles/local_gpu.yaml --verbose
+python scripts/train.py --config configs/experiments/cifar10/resnet18/ablations/groupdro.yaml --profile configs/profiles/local_gpu.yaml --verbose
 ```
 
 Smoke runs:

@@ -3,7 +3,7 @@ _base_:
   - ../../../../fragments/datasets/cifar10.yaml
   - ../../../../fragments/models/resnet18.yaml
   - ../../../../fragments/methods/erm.yaml
-  - ../../../../fragments/attacks/cifar10_eval_all_attacks.yaml
+  - ../../../../fragments/attacks/heldout_all_attacks.yaml
   - ../../../../fragments/logging/wandb_required.yaml
 
 experiment:

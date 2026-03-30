@@ -1,91 +1,61 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
 torch = pytest.importorskip("torch")
-pytest.importorskip("torchattacks")
+from torch.utils.data import DataLoader, Dataset
 
-from ardg.attacks.pgd import build_pgd_attack
-from ardg.data.transforms import get_dataset_stats
-import ardg.training.objectives.multi_attack_erm as multi_attack_module
+from ardg.data.grouping import GroupHomogeneousBatchSampler, RepeatedGroupDataset
+import ardg.training.objectives.groupdro as groupdro_module
 from ardg.training.objectives.groupdro import GroupDRO
-from ardg.training.objectives.groupdro_state import (
-    DomainWeightState,
-    update_q_from_losses,
-    weighted_group_loss,
-)
 
 
-class TinyModel(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.scale = torch.nn.Parameter(torch.tensor(1.0))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        flat = x.view(x.size(0), -1).mean(dim=1, keepdim=True) * self.scale
-        return torch.cat([flat, -flat], dim=1)
-
-
-class DomainAwareModel(torch.nn.Module):
+class ZeroLogitModel(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.bias = torch.nn.Parameter(torch.tensor(0.0))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        offset = float(x.mean().item())
-        if offset < 0.05:
-            logits = torch.tensor([[0.0, 0.1], [0.1, 0.0]], dtype=torch.float32, device=x.device)
-        elif offset < 0.15:
-            logits = torch.tensor([[3.0, 0.0], [0.0, 3.0]], dtype=torch.float32, device=x.device)
-        elif offset < 0.25:
-            logits = torch.tensor([[3.0, 0.0], [3.0, 0.0]], dtype=torch.float32, device=x.device)
-        else:
-            logits = torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32, device=x.device)
+        del x
+        logits = torch.zeros((2, 2), dtype=torch.float32, device=self.bias.device)
         return logits + self.bias
 
 
-def _make_groupdro_cfg() -> dict:
+class TinyDataset(Dataset):
+    def __len__(self) -> int:
+        return 5
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
+        x = torch.tensor([[[float(idx)]]], dtype=torch.float32)
+        y = int(idx % 2)
+        return x, y
+
+
+def _make_groupdro_cfg(eta_q: float = 1.0) -> dict:
     return {
-        "experiment": {"seed": 42},
         "dataset": {"name": "cifar10"},
         "train": {
             "mode": "groupdro",
-            "domain_strategy": "all_domains",
             "groupdro": {
-                "eta_q": 0.0,
-                "include_clean": True,
-                "init_q": "uniform",
+                "eta_q": eta_q,
                 "selection_metric": "val/acc_worst",
             },
         },
         "attack": {
             "train_domains": [
                 {"label": "clean", "type": "clean"},
-                {"label": "fgsm_rs", "type": "fgsm", "eps": 8.0 / 255.0, "alpha": 8.0 / 255.0, "random_start": True},
-                {"label": "pgd_ce", "type": "pgd", "eps": 8.0 / 255.0, "step_size": 2.0 / 255.0, "num_steps": 2, "loss": "ce"},
-                {"label": "pgd_dlr", "type": "pgd", "eps": 8.0 / 255.0, "step_size": 2.0 / 255.0, "num_steps": 2, "loss": "dlr"},
+                {"label": "shift", "type": "pgd", "eps": 8.0 / 255.0, "step_size": 2.0 / 255.0, "num_steps": 2, "loss": "ce"},
             ]
         },
     }
 
 
-def _fake_build_attack(spec: dict, model: torch.nn.Module, dataset_name: str, shared_norm=None, shared_eps=None):  # noqa: ANN001
-    del model, dataset_name, shared_norm, shared_eps
-    offsets = {
-        "clean": 0.0,
-        "fgsm_rs": 0.1,
-        "fgsm_rs_linf": 0.1,
-        "pgd_ce": 0.2,
-        "pgd_ce_linf": 0.2,
-        "pgd_ce_l2": 0.25,
-        "pgd_dlr": 0.3,
-        "pgd_dlr_linf": 0.3,
-        "pgd_dlr_l2": 0.35,
-        "cw_l2": 0.4,
-        "deepfool_l2": 0.45,
-    }
-    name = str(spec.get("name", spec.get("label", spec.get("type", "clean"))))
-    offset = float(offsets[name])
+def _fake_build_attack(spec: dict, model: torch.nn.Module, dataset_name: str):  # noqa: ANN001
+    del model, dataset_name
+    name = str(spec.get("label", spec.get("name", spec.get("type", "clean"))))
+    offset = 0.0 if name == "clean" else 0.25
 
     def attack(images: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         del labels
@@ -94,236 +64,85 @@ def _fake_build_attack(spec: dict, model: torch.nn.Module, dataset_name: str, sh
     return attack
 
 
-def test_q_update_correctness() -> None:
-    losses = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32)
-    q0 = torch.ones(3, dtype=torch.float32) / 3.0
+def test_groupdro_native_step_updates_only_current_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(groupdro_module, "build_attack", _fake_build_attack)
 
-    q1 = update_q_from_losses(q0, losses, eta_q=0.5)
-
-    assert torch.isclose(q1.sum(), torch.tensor(1.0), atol=1e-6)
-    assert q1[2] > q1[1] > q1[0]
-    assert torch.all(q1 >= 0)
-
-
-def test_weighted_loss_correctness() -> None:
-    q = torch.tensor([0.2, 0.3, 0.5], dtype=torch.float32)
-    losses = torch.tensor([1.0, 2.0, 4.0], dtype=torch.float32)
-
-    total = weighted_group_loss(q, losses)
-
-    assert torch.isclose(total, torch.tensor(2.8), atol=1e-6)
-
-
-def test_eta_zero_matches_mean_loss() -> None:
-    losses = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32)
-    state = DomainWeightState(["a", "b", "c", "d"], eta_q=0.0, init_q="uniform")
-
-    q = state.update(losses)
-    total = weighted_group_loss(q, losses)
-
-    assert torch.allclose(q, torch.ones_like(q) / 4.0, atol=1e-6)
-    assert torch.isclose(total, losses.mean(), atol=1e-6)
-
-
-def test_state_dict_roundtrip() -> None:
-    state = DomainWeightState(["clean", "fgsm_rs", "pgd_ce", "pgd_dlr"], eta_q=0.1, init_q="uniform")
-    state.set_q(torch.tensor([0.1, 0.2, 0.3, 0.4], dtype=torch.float32))
-
-    payload = state.state_dict()
-    restored = DomainWeightState(["clean", "fgsm_rs", "pgd_ce", "pgd_dlr"], eta_q=0.1, init_q="uniform")
-    restored.load_state_dict(payload)
-
-    assert restored.q is not None
-    assert torch.allclose(restored.q, state.q, atol=1e-6)
-
-
-def test_all_domains_coverage(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
-
-    model = TinyModel()
-    objective = GroupDRO(_make_groupdro_cfg(), model)
+    objective = GroupDRO(_make_groupdro_cfg(eta_q=1.0), ZeroLogitModel())
     batch = {
-        "x": torch.randn(4, 3, 4, 4),
-        "y": torch.tensor([0, 1, 0, 1], dtype=torch.long),
+        "x": torch.zeros(2, 1, 2, 2),
+        "y": torch.tensor([0, 1], dtype=torch.long),
+        "group_id": torch.zeros(2, dtype=torch.long),
     }
 
-    out = objective.preprocess_batch(batch, model)
+    loss, metrics = objective.compute_loss(objective.model, batch)
 
-    assert out["domain_names"] == ["clean", "fgsm_rs", "pgd_ce", "pgd_dlr"]
-    assert len(out["x_domains"]) == 4
-    assert all(t.shape == batch["x"].shape for t in out["x_domains"])
-    assert all(count == batch["x"].size(0) for count in out["domain_batch_counts"].values())
-    assert torch.allclose(out["x_domains"][0], batch["x"])
+    expected_group_loss = math.log(2.0)
+    expected_q = torch.tensor([2.0 / 3.0, 1.0 / 3.0], dtype=torch.float32)
 
-
-def test_objective_state_dict_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
-
-    model = TinyModel()
-    objective = GroupDRO(_make_groupdro_cfg(), model)
-    objective.q_state.set_q(torch.tensor([0.1, 0.2, 0.3, 0.4], dtype=torch.float32))
-    objective.normalized_loss_state.set_ema_losses(torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32))
-
-    clone = GroupDRO(_make_groupdro_cfg(), TinyModel())
-    clone.load_state_dict(objective.state_dict())
-
-    assert clone.q is not None
-    assert objective.q is not None
-    assert torch.allclose(clone.q, objective.q, atol=1e-6)
-    assert clone.normalized_loss_state.ema_losses is not None
-    assert objective.normalized_loss_state.ema_losses is not None
-    assert torch.allclose(clone.normalized_loss_state.ema_losses, objective.normalized_loss_state.ema_losses, atol=1e-6)
+    assert torch.allclose(objective.q.cpu(), expected_q, atol=1e-6)
+    assert torch.isclose(loss.detach().cpu(), torch.tensor((2.0 / 3.0) * expected_group_loss), atol=1e-6)
+    assert metrics["loss_group"] == pytest.approx(expected_group_loss, rel=1e-6)
+    assert metrics["group_id"] == 0
+    assert metrics["q_g"] == pytest.approx(2.0 / 3.0, rel=1e-6)
+    assert metrics["q_max"] == pytest.approx(2.0 / 3.0, rel=1e-6)
+    assert metrics["q_min"] == pytest.approx(1.0 / 3.0, rel=1e-6)
+    assert metrics["correct"] == 1
+    assert metrics["batch_size"] == 2
 
 
-def test_groupdro_tracks_worst_group_by_accuracy(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
+def test_groupdro_native_mode_requires_group_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(groupdro_module, "build_attack", _fake_build_attack)
 
-    model = DomainAwareModel()
-    objective = GroupDRO(_make_groupdro_cfg(), model)
+    objective = GroupDRO(_make_groupdro_cfg(), ZeroLogitModel())
     batch = {
-        "x": torch.zeros(2, 3, 4, 4),
+        "x": torch.zeros(2, 1, 2, 2),
         "y": torch.tensor([0, 1], dtype=torch.long),
     }
 
-    processed = objective.preprocess_batch(batch, model)
-    _, metrics = objective.compute_loss(model, processed)
-
-    assert metrics["worst_group"] == "clean"
-    assert metrics["worst_group_mode"] == "acc"
-    assert metrics["worst_group_by_acc"] == "clean"
-    assert metrics["worst_group_by_loss"] == "pgd_ce"
-    assert metrics["loss_pgd_ce"] > metrics["loss_clean"]
+    with pytest.raises(ValueError, match="group ids"):
+        objective.compute_loss(objective.model, batch)
 
 
-def test_groupdro_accepts_cw_train_domain(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
+def test_groupdro_native_mode_rejects_mixed_group_batches(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(groupdro_module, "build_attack", _fake_build_attack)
 
-    cfg = _make_groupdro_cfg()
-    cfg["attack"]["train_domains"] = [
-        {"label": "clean", "type": "clean"},
-        {"label": "pgd_ce", "type": "pgd", "eps": 8.0 / 255.0, "step_size": 2.0 / 255.0, "num_steps": 2, "loss": "ce"},
-        {"label": "cw_l2", "type": "cw", "steps": 5, "lr": 0.01},
-    ]
-
-    model = TinyModel()
-    objective = GroupDRO(cfg, model)
+    objective = GroupDRO(_make_groupdro_cfg(), ZeroLogitModel())
     batch = {
-        "x": torch.randn(4, 3, 4, 4),
-        "y": torch.tensor([0, 1, 0, 1], dtype=torch.long),
-    }
-
-    out = objective.preprocess_batch(batch, model)
-
-    assert out["domain_names"] == ["clean", "pgd_ce", "cw_l2"]
-    assert len(out["x_domains"]) == 3
-
-
-def test_groupdro_accepts_mixed_norm_and_deepfool_train_domains(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
-
-    cfg = _make_groupdro_cfg()
-    cfg["attack"]["train_domains"] = [
-        {"label": "pgd_ce_linf", "type": "pgd", "norm": "Linf", "eps": 8.0 / 255.0, "step_size": 2.0 / 255.0, "num_steps": 2, "loss": "ce"},
-        {"label": "pgd_ce_l2", "type": "pgd", "norm": "L2", "eps": 1.0, "step_size": 0.2, "num_steps": 2, "loss": "ce"},
-        {"label": "deepfool_l2", "type": "deepfool", "num_steps": 5, "overshoot": 0.02},
-        {"label": "cw_l2", "type": "cw", "steps": 5, "lr": 0.01},
-    ]
-
-    model = TinyModel()
-    objective = GroupDRO(cfg, model)
-    batch = {
-        "x": torch.randn(4, 3, 4, 4),
-        "y": torch.tensor([0, 1, 0, 1], dtype=torch.long),
-    }
-
-    out = objective.preprocess_batch(batch, model)
-
-    assert out["domain_names"] == ["clean", "pgd_ce_linf", "pgd_ce_l2", "deepfool_l2", "cw_l2"]
-    assert len(out["x_domains"]) == 5
-
-
-def test_groupdro_tracks_worst_group_by_loss_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
-
-    cfg = _make_groupdro_cfg()
-    cfg["train"]["groupdro"]["worst_group_by"] = "loss"
-
-    model = DomainAwareModel()
-    objective = GroupDRO(cfg, model)
-    batch = {
-        "x": torch.zeros(2, 3, 4, 4),
+        "x": torch.zeros(2, 1, 2, 2),
         "y": torch.tensor([0, 1], dtype=torch.long),
+        "group_id": torch.tensor([0, 1], dtype=torch.long),
     }
 
-    processed = objective.preprocess_batch(batch, model)
-    _, metrics = objective.compute_loss(model, processed)
-
-    assert metrics["worst_group"] == "pgd_ce"
-    assert metrics["worst_group_mode"] == "loss"
-    assert metrics["worst_group_by_acc"] == "clean"
-    assert metrics["worst_group_by_loss"] == "pgd_ce"
+    with pytest.raises(ValueError, match="exactly one group"):
+        objective.compute_loss(objective.model, batch)
 
 
-def test_groupdro_tracks_worst_group_by_normalized_loss_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
+def test_groupdro_q_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(groupdro_module, "build_attack", _fake_build_attack)
 
-    cfg = _make_groupdro_cfg()
-    cfg["train"]["groupdro"]["worst_group_by"] = "normalized_loss"
+    objective = GroupDRO(_make_groupdro_cfg(), ZeroLogitModel())
+    objective.q = torch.tensor([0.8, 0.2], dtype=torch.float32)
 
-    model = DomainAwareModel()
-    objective = GroupDRO(cfg, model)
-    objective.normalized_loss_state.set_ema_losses(torch.tensor([0.1, 10.0, 10.0, 10.0], dtype=torch.float32))
-    batch = {
-        "x": torch.zeros(2, 3, 4, 4),
-        "y": torch.tensor([0, 1], dtype=torch.long),
-    }
+    restored = GroupDRO(_make_groupdro_cfg(), ZeroLogitModel())
+    restored.load_state_dict(objective.state_dict())
 
-    processed = objective.preprocess_batch(batch, model)
-    _, metrics = objective.compute_loss(model, processed)
-
-    assert metrics["worst_group"] == "clean"
-    assert metrics["worst_group_mode"] == "normalized_loss"
-    assert metrics["worst_group_by_acc"] == "clean"
-    assert metrics["worst_group_by_loss"] == "pgd_ce"
-    assert metrics["worst_group_by_normalized_loss"] == "clean"
-    assert metrics["normalized_loss_clean"] > metrics["normalized_loss_pgd_ce"]
+    assert torch.allclose(restored.q, objective.q, atol=1e-6)
 
 
-def test_groupdro_rejects_invalid_worst_group_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(multi_attack_module, "build_attack", _fake_build_attack)
-
-    cfg = _make_groupdro_cfg()
-    cfg["train"]["groupdro"]["worst_group_by"] = "foo"
-
-    with pytest.raises(ValueError, match="worst_group_by"):
-        GroupDRO(cfg, TinyModel())
-
-
-def test_build_pgd_attack_supports_l2_dlr() -> None:
-    model = TinyModel().eval()
-    attack = build_pgd_attack(
-        {
-            "dataset_name": "cifar10",
-            "norm": "L2",
-            "eps": 1.0,
-            "step_size": 0.2,
-            "num_steps": 2,
-            "restarts": 1,
-            "loss": "dlr",
-            "random_start": True,
-        },
-        model,
+def test_group_homogeneous_batch_sampler_emits_single_group_batches() -> None:
+    dataset = RepeatedGroupDataset(TinyDataset(), num_groups=3)
+    sampler = GroupHomogeneousBatchSampler(
+        base_size=5,
+        num_groups=3,
+        batch_size=2,
+        shuffle=False,
+        drop_last=False,
     )
+    loader = DataLoader(dataset, batch_sampler=sampler)
 
-    images = torch.rand(2, 3, 4, 4)
-    mean, std = get_dataset_stats("cifar10")
-    mean_t = torch.tensor(mean, dtype=images.dtype).view(1, 3, 1, 1)
-    std_t = torch.tensor(std, dtype=images.dtype).view(1, 3, 1, 1)
-    images_norm = (images - mean_t) / std_t
-    labels = torch.tensor([0, 1], dtype=torch.long)
-    adv_norm = attack(images_norm, labels)
-    adv = adv_norm * std_t + mean_t
+    batches = list(loader)
 
-    assert adv.shape == images.shape
-    delta_norm = (adv - images).view(images.size(0), -1).norm(p=2, dim=1)
-    assert torch.all(delta_norm <= 1.0 + 1e-4)
+    assert len(batches) == 9
+    for batch in batches:
+        assert "group_id" in batch
+        assert int(torch.unique(batch["group_id"]).numel()) == 1
