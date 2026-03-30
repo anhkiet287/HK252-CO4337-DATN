@@ -19,5 +19,10 @@ train:
     t_max: 100
     eta_min: 0.0
   groupdro:
+    update_mode: online
     eta_q: 0.02
     selection_metric: val/acc_worst
+    logging:
+      plot_q_trajectory: true
+      plot_every_epochs: 1
+      max_plot_points: 2000

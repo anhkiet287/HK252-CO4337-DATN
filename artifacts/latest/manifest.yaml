@@ -24,17 +24,17 @@ canonical:
 latest:
   resnet18:
     train:
-      run_name: resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42
-      run_dir: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42
-      resolved_config: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/resolved_config.yaml
-      run_manifest: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/run_manifest.json
-      config_path: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/experiments/cifar10/resnet18/ablations/groupdro_pgd_linf_pgd_l2.yaml
+      run_name: resnet18_dev_ablation_groupdro_batch_pgd_linf_pgd_l2_seed42
+      run_dir: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_batch_pgd_linf_pgd_l2_seed42
+      resolved_config: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_batch_pgd_linf_pgd_l2_seed42/resolved_config.yaml
+      run_manifest: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_batch_pgd_linf_pgd_l2_seed42/run_manifest.json
+      config_path: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/experiments/cifar10/resnet18/ablations/groupdro_batch_pgd_linf_pgd_l2.yaml
       profile_path: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/configs/profiles/dev_fast.yaml
-      wandb_run_id: h1yktxp8
+      wandb_run_id: ubq8qrbb
       wandb_url: null
-      best_checkpoint: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/checkpoints/best.pt
-      last_checkpoint: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/checkpoints/last.pt
-      train_summary_json: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42/train/summary.json
+      best_checkpoint: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_batch_pgd_linf_pgd_l2_seed42/checkpoints/best.pt
+      last_checkpoint: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_batch_pgd_linf_pgd_l2_seed42/checkpoints/last.pt
+      train_summary_json: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_batch_pgd_linf_pgd_l2_seed42/train/summary.json
     eval:
       run_name: resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42_eval
       run_dir: /mnt/c/Users/ADMIN/Github/HCMUT/HK252-CO4337-DATN/outputs/dev_fast/resnet18_dev_ablation_groupdro_pgd_linf_pgd_l2_seed42_eval

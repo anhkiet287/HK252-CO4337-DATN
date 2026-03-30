@@ -122,22 +122,31 @@ def get_dataloaders(cfg: dict) -> Tuple[Any, Any, Any]:
 
     pin = torch.cuda.is_available()
 
-    if _use_groupdro_native_loader(cfg) and _has_groupdro_train_domains(cfg):
+    if _use_groupdro_loader(cfg) and _has_groupdro_train_domains(cfg):
         num_groups = _resolve_groupdro_num_groups(cfg)
         grouped_train = RepeatedGroupDataset(train_subset, num_groups=num_groups)
-        batch_sampler = GroupHomogeneousBatchSampler(
-            base_size=len(train_subset),
-            num_groups=num_groups,
-            batch_size=batch_size,
-            shuffle=True,
-            drop_last=False,
-        )
-        train_loader = DataLoader(
-            grouped_train,
-            batch_sampler=batch_sampler,
-            num_workers=num_workers,
-            pin_memory=pin,
-        )
+        if _resolve_groupdro_update_mode(cfg) == "online":
+            batch_sampler = GroupHomogeneousBatchSampler(
+                base_size=len(train_subset),
+                num_groups=num_groups,
+                batch_size=batch_size,
+                shuffle=True,
+                drop_last=False,
+            )
+            train_loader = DataLoader(
+                grouped_train,
+                batch_sampler=batch_sampler,
+                num_workers=num_workers,
+                pin_memory=pin,
+            )
+        else:
+            train_loader = DataLoader(
+                grouped_train,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=num_workers,
+                pin_memory=pin,
+            )
     else:
         train_loader = DataLoader(
             train_subset,
@@ -163,7 +172,7 @@ def get_dataloaders(cfg: dict) -> Tuple[Any, Any, Any]:
     return train_loader, val_loader, test_loader
 
 
-def _use_groupdro_native_loader(cfg: dict) -> bool:
+def _use_groupdro_loader(cfg: dict) -> bool:
     mode = str(cfg.get("train", {}).get("mode", "")).lower()
     return mode in {"groupdro", "group_dro"}
 
@@ -177,6 +186,15 @@ def _resolve_groupdro_num_groups(cfg: dict) -> int:
     train_domains = cfg.get("attack", {}).get("train_domains")
     if not isinstance(train_domains, list) or not train_domains:
         raise ValueError(
-            "GroupDRO native mode requires attack.train_domains to define the fixed groups."
+            "GroupDRO requires attack.train_domains to define the fixed groups."
         )
     return len(train_domains)
+
+
+def _resolve_groupdro_update_mode(cfg: dict) -> str:
+    update_mode = str(cfg.get("train", {}).get("groupdro", {}).get("update_mode", "online")).strip().lower()
+    if update_mode not in {"online", "batch"}:
+        raise ValueError(
+            f"Unsupported train.groupdro.update_mode={update_mode!r}. Use 'online' or 'batch'."
+        )
+    return update_mode

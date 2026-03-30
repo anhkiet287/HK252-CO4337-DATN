@@ -121,6 +121,7 @@ class Trainer:
         self.best_avg_metric = float("-inf")
         self.best_avg_path: Optional[str] = None
         self.train_mode = str(cfg.get("train", {}).get("mode", "")).lower()
+        self._groupdro_q_plot_warning_emitted = False
 
         # early stopping
         es_cfg = cfg["train"].get("early_stopping", {})
@@ -213,6 +214,7 @@ class Trainer:
                         epoch=epoch,
                         log_by_epoch=True,
                     )
+                self._maybe_log_groupdro_q_trajectory(epoch)
             val_acc = float(val_metrics.get("val/acc_clean", val_metrics.get("val/acc", 0.0))) # cache val acc for select best model 
             selection_names = _resolve_selection_names(self.cfg, val_metrics)
             ckpt_vector = tuple(float(val_metrics.get(n, float("-inf"))) for n in selection_names)
@@ -326,6 +328,7 @@ class Trainer:
 
         if not last_ckpt_path:
             raise RuntimeError("No checkpoint saved during training.")
+        self._maybe_log_groupdro_q_trajectory(completed_epoch, force=True)
         best_path = self.best_ckpt_path or last_ckpt_path
         summary_path = self._write_train_summary(
             {
@@ -547,6 +550,9 @@ class Trainer:
                 metrics,
             )
             if self.train_mode in {"groupdro", "group_dro"}:
+                record_q_snapshot = getattr(self.objective, "record_q_snapshot", None)
+                if callable(record_q_snapshot):
+                    record_q_snapshot(self.global_step)
                 groupdro_step_metrics = _extract_groupdro_step_metrics(metrics)
                 if groupdro_step_metrics:
                     log_metrics(self.logger, groupdro_step_metrics, self.global_step, "train_step")
@@ -600,6 +606,43 @@ class Trainer:
         if isinstance(extra, dict):
             metrics.update({f"val/{k}" if not k.startswith("val/") else k: v for k, v in extra.items()})
         return metrics
+
+    def _maybe_log_groupdro_q_trajectory(self, epoch: int, *, force: bool = False) -> None:
+        if self.train_mode not in {"groupdro", "group_dro"}:
+            return
+        should_log = getattr(self.objective, "should_log_q_trajectory", None)
+        build_figure = getattr(self.objective, "build_q_trajectory_figure", None)
+        if not callable(should_log) or not callable(build_figure):
+            return
+        if not should_log(epoch, force=force):
+            return
+
+        fig = build_figure()
+        if fig is None:
+            if not self._groupdro_q_plot_warning_emitted:
+                self.logger.warning(
+                    "Skipping GroupDRO q trajectory figure because matplotlib is not available."
+                )
+                self._groupdro_q_plot_warning_emitted = True
+            return
+
+        figure_path = Path(self.run_dir) / "artifacts" / "groupdro_q_trajectory.png"
+        ensure_dir(str(figure_path.parent))
+        try:
+            fig.savefig(figure_path, dpi=160)
+            try:
+                import wandb  # type: ignore
+            except ImportError:
+                wandb = None
+            if wandb is not None and getattr(wandb, "run", None) is not None:
+                wandb.log({"groupdro/q_trajectory": wandb.Image(fig)}, step=self.global_step)
+        finally:
+            try:
+                import matplotlib.pyplot as plt
+            except ImportError:
+                plt = None
+            if plt is not None:
+                plt.close(fig)
 
     def _train_step(self, batch: Any) -> Dict[str, Any]:
         """Run a single training step."""

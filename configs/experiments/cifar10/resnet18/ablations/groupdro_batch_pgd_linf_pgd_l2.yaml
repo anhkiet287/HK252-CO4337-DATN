@@ -1,0 +1,9 @@
+_base_:
+  - ./groupdro_pgd_linf_pgd_l2.yaml
+
+experiment:
+  name: ablation_groupdro_batch_pgd_linf_pgd_l2
+
+train:
+  groupdro:
+    update_mode: batch
