@@ -94,7 +94,10 @@ class GroupDRO(Objective):
 
             group_id = int(unique_groups.item())
             attacked = self._apply_group_attack(model, images, labels, group_id)
-            with self.autocast_context():
+            # Robust losses can overflow in fp16 on harder attack batches.
+            # Keep GroupDRO loss computation in full precision even when the run
+            # uses mixed precision globally.
+            with self.full_precision_context():
                 logits = model(attacked)
                 # loss_group is the scalar mean loss for the current group batch.
                 loss_group = torch.nn.functional.cross_entropy(logits, labels)
@@ -141,7 +144,9 @@ class GroupDRO(Objective):
                 mask = group_ids == group_id
                 attacked[mask] = self._apply_group_attack(model, images[mask], labels[mask], group_id)
 
-            with self.autocast_context():
+            # Batch-mode GroupDRO aggregates several adversarial subgroups in one
+            # step, so keep the logits/loss path in full precision for stability.
+            with self.full_precision_context():
                 logits = model(attacked)
                 per_sample_losses = torch.nn.functional.cross_entropy(logits, labels, reduction="none")
 
